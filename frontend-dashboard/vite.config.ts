@@ -74,10 +74,45 @@ function regionsPlugin(): Plugin {
   };
 }
 
+function pwaDocPlugin(): Plugin {
+  const docPath = resolve(rootDir, "../PWA.md");
+  const send = (res: {
+    statusCode: number;
+    setHeader: (k: string, v: string) => void;
+    end: (b: string) => void;
+  }) => {
+    if (!existsSync(docPath)) {
+      res.statusCode = 404;
+      res.end("not found");
+      return;
+    }
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.end(readFileSync(docPath, "utf8"));
+  };
+  return {
+    name: "valealerta-pwa-md",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split("?")[0] ?? "";
+        if (url === "/PWA.md") {
+          send(res);
+          return;
+        }
+        next();
+      });
+    },
+    generateBundle() {
+      if (!existsSync(docPath)) return;
+      this.emitFile({ type: "asset", fileName: "PWA.md", source: readFileSync(docPath, "utf8") });
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
     regionsPlugin(),
+    pwaDocPlugin(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: [
@@ -120,9 +155,9 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,json,geojson,png,webmanifest,woff2}"],
+        globPatterns: ["**/*.{js,css,html,svg,json,geojson,png,webmanifest,woff2,md}"],
         navigateFallback: "index.html",
-        navigateFallbackDenylist: [/^\/copernicus-dem\//, /^\/ana-hidro\//],
+        navigateFallbackDenylist: [/^\/copernicus-dem\//, /^\/ana-hidro\//, /\.md$/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\.open-meteo\.com\/.*/i,

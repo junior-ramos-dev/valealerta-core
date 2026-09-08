@@ -47,6 +47,7 @@ import {
   type RegionPack,
 } from "./region";
 import { prepareBasinOffline } from "./offlineBasin";
+import { PwaGuideDialog } from "./PwaGuide";
 import {
   renderSpillHeatmap,
   DEPTH_SCALE,
@@ -245,6 +246,7 @@ export default function App() {
     "idle",
   );
   const [basinPrepNote, setBasinPrepNote] = useState<string | null>(null);
+  const [pwaGuideOpen, setPwaGuideOpen] = useState(false);
   const [waterLevelCm, setWaterLevelCm] = useState(30);
   const [spillStageM, setSpillStageM] = useState(6);
   const [focusCityId, setFocusCityId] = useState<string>("");
@@ -991,11 +993,12 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (drawingRef.current) return;
+      if (pwaGuideOpen) return;
       setHelpOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [helpOpen]);
+  }, [helpOpen, pwaGuideOpen]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -1282,6 +1285,7 @@ export default function App() {
               Pacote provisório — {region.calibration.note}
             </p>
           )}
+          <div className="basin-offline-row">
           <button
             type="button"
             className="basin-offline-btn"
@@ -1314,6 +1318,18 @@ export default function App() {
               ? "Baixando…"
               : "Baixar esta bacia para o celular"}
           </button>
+          <button
+            type="button"
+            className="basin-offline-help"
+            aria-label="O que significa baixar esta bacia para o celular"
+            aria-expanded={pwaGuideOpen}
+            aria-haspopup="dialog"
+            title="O que significa baixar esta bacia"
+            onClick={() => setPwaGuideOpen(true)}
+          >
+            ?
+          </button>
+          </div>
           {basinPrepNote && (
             <p className="basin-offline-note">{basinPrepNote}</p>
           )}
@@ -2443,6 +2459,7 @@ export default function App() {
             </div>
           )}
       </div>
+      <PwaGuideDialog open={pwaGuideOpen} onClose={() => setPwaGuideOpen(false)} />
     </div>
   );
 }
