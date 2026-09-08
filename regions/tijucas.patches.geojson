@@ -1,0 +1,6 @@
+{
+  "type": "FeatureCollection",
+  "name": "valealerta-topo-patches-tijucas",
+  "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+  "features": []
+}

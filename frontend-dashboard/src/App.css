@@ -357,3 +357,46 @@
   transform: translateX(-50%);
   z-index: 1;
 }
+
+.map-flood-tip {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(17, 17, 17, 0.92);
+  border: 1px solid #444;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.map-flood-tip-swatch {
+  min-width: 52px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-flood-tip-mmh {
+  display: flex;
+  flex-direction: column;
+  color: #7fdbfa;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-flood-tip-mmh span {
+  color: #aaa;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}

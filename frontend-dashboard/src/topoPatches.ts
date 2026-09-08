@@ -29,9 +29,20 @@ export type PatchDemCheck = {
 
 export type TopoPatchFeature = Feature<Polygon, TopoPatchProps>;
 
-const STORAGE_KEY = "valealerta-topo-patches";
-const DELETED_KEY = "valealerta-topo-patches-deleted";
-export const BUNDLED_PATCHES_URL = "/topo_patches.geojson";
+const LEGACY_STORAGE_KEY = "valealerta-topo-patches";
+const LEGACY_DELETED_KEY = "valealerta-topo-patches-deleted";
+
+export function patchesStorageKey(regionId: string): string {
+  return `valealerta-topo-patches:${regionId}`;
+}
+
+export function patchesDeletedKey(regionId: string): string {
+  return `valealerta-topo-patches-deleted:${regionId}`;
+}
+
+export function bundledPatchesUrl(regionId: string): string {
+  return `/regions/${encodeURIComponent(regionId)}.patches.geojson`;
+}
 
 export function emptyPatchCollection(): FeatureCollection<Polygon, TopoPatchProps> {
   return { type: "FeatureCollection", features: [] };
@@ -87,23 +98,29 @@ export function parsePatchCollection(body: unknown): TopoPatchFeature[] {
     .filter((f): f is TopoPatchFeature => f != null);
 }
 
-export function loadLocalPatches(): TopoPatchFeature[] {
+function readPatchList(key: string): TopoPatchFeature[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     return parsePatchCollection(JSON.parse(raw)).map((f) => ({
       ...f,
-      properties: { ...f.properties, origin: "local" },
+      properties: { ...f.properties, origin: "local" as const },
     }));
   } catch {
     return [];
   }
 }
 
-export function saveLocalPatches(features: TopoPatchFeature[]): void {
+export function loadLocalPatches(regionId = "tijucas"): TopoPatchFeature[] {
+  const scoped = readPatchList(patchesStorageKey(regionId));
+  if (scoped.length || regionId !== "tijucas") return scoped;
+  return readPatchList(LEGACY_STORAGE_KEY);
+}
+
+export function saveLocalPatches(features: TopoPatchFeature[], regionId = "tijucas"): void {
   const local = features.filter((f) => f.properties.origin === "local");
   localStorage.setItem(
-    STORAGE_KEY,
+    patchesStorageKey(regionId),
     JSON.stringify({
       type: "FeatureCollection",
       features: local,
@@ -111,9 +128,12 @@ export function saveLocalPatches(features: TopoPatchFeature[]): void {
   );
 }
 
-export async function loadBundledPatches(signal?: AbortSignal): Promise<TopoPatchFeature[]> {
+export async function loadBundledPatches(
+  signal?: AbortSignal,
+  regionId = "tijucas",
+): Promise<TopoPatchFeature[]> {
   try {
-    const res = await fetch(BUNDLED_PATCHES_URL, { signal });
+    const res = await fetch(bundledPatchesUrl(regionId), { signal });
     if (!res.ok) return [];
     return parsePatchCollection(await res.json()).map((f) => ({
       ...f,
@@ -124,9 +144,9 @@ export async function loadBundledPatches(signal?: AbortSignal): Promise<TopoPatc
   }
 }
 
-export function loadDeletedPatchIds(): string[] {
+function readDeleted(key: string): string[] {
   try {
-    const raw = localStorage.getItem(DELETED_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
@@ -135,8 +155,14 @@ export function loadDeletedPatchIds(): string[] {
   }
 }
 
-export function saveDeletedPatchIds(ids: string[]): void {
-  localStorage.setItem(DELETED_KEY, JSON.stringify([...new Set(ids)]));
+export function loadDeletedPatchIds(regionId = "tijucas"): string[] {
+  const scoped = readDeleted(patchesDeletedKey(regionId));
+  if (scoped.length || regionId !== "tijucas") return scoped;
+  return readDeleted(LEGACY_DELETED_KEY);
+}
+
+export function saveDeletedPatchIds(ids: string[], regionId = "tijucas"): void {
+  localStorage.setItem(patchesDeletedKey(regionId), JSON.stringify([...new Set(ids)]));
 }
 
 export function mergePatches(

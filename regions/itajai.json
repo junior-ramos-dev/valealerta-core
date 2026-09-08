@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "id": "itajai",
+  "title": "Vale Alerta para Enchentes",
+  "subtitle": "Vale do Itajaí — simulador de escoamento",
+  "river_name": "Rio Itajaí-Açu",
+  "target_city_id": "blumenau",
+  "surge_city_id": "rio-do-sul",
+  "live_gauge_id": "blumenau",
+  "calibration": {
+    "status": "provisional",
+    "benchmark_events": ["2008-11 Blumenau ~17 m na régua municipal", "2011", "2023-10"],
+    "note": "Cotas, lags e códigos ANA são ponto de partida. Confira estações no HidroWeb e a cota de transbordo com a Defesa Civil / CEOPS-Blumenau antes de usar em operação. Não copie os 6 m de São João Batista."
+  },
+  "region": {
+    "name": "Vale do Itajaí, SC, Brazil",
+    "valley": "Rio Itajaí-Açu",
+    "crs": "EPSG:4326",
+    "bbox": {
+      "south": -27.35,
+      "west": -49.85,
+      "north": -26.72,
+      "east": -48.52
+    },
+    "center": { "lat": -26.9194, "lon": -49.0661 },
+    "default_zoom": 12.6
+  },
+  "cities": [
+    {
+      "id": "rio-do-sul",
+      "name": "Rio do Sul",
+      "role": "headwater",
+      "lat": -27.214,
+      "lon": -49.643,
+      "zoom": 12.6,
+      "lag_to_target_h": 10,
+      "blurb": "Alto vale do Itajaí-Açu — entrada da onda rumo a Blumenau",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 7,
+      "spill_stage_min_m": 6,
+      "spill_stage_max_m": 12,
+      "spill_stage_stops_m": [6, 7, 8, 10, 12],
+      "spill_note": "Alto vale — provisório. Confirme com a Defesa Civil de Rio do Sul."
+    },
+    {
+      "id": "ibirama",
+      "name": "Ibirama",
+      "role": "upper_catchment",
+      "lat": -27.057,
+      "lon": -49.518,
+      "zoom": 12.8,
+      "lag_to_target_h": 8,
+      "blurb": "Médio alto vale, a jusante de Rio do Sul",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 6.5,
+      "spill_stage_min_m": 5.5,
+      "spill_stage_max_m": 10,
+      "spill_stage_stops_m": [5.5, 6.5, 8, 10],
+      "spill_note": "Provisório — Defesa Civil de Ibirama."
+    },
+    {
+      "id": "apiuna",
+      "name": "Apiúna",
+      "role": "surge_entry",
+      "lat": -27.036,
+      "lon": -49.39,
+      "zoom": 13,
+      "lag_to_target_h": 6,
+      "blurb": "Estreitamento do vale antes de Indaial",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 6.5,
+      "spill_stage_min_m": 5.5,
+      "spill_stage_max_m": 10,
+      "spill_stage_stops_m": [5.5, 6.5, 8, 10],
+      "spill_note": "Provisório — Defesa Civil de Apiúna."
+    },
+    {
+      "id": "indaial",
+      "name": "Indaial",
+      "role": "intermediate_crest",
+      "lat": -26.899,
+      "lon": -49.232,
+      "zoom": 13,
+      "lag_to_target_h": 2,
+      "blurb": "Planície a montante imediato de Blumenau",
+      "normal_stage_cm": 50,
+      "spill_stage_m": 7,
+      "spill_stage_min_m": 6,
+      "spill_stage_max_m": 12,
+      "spill_stage_stops_m": [6, 7, 8, 10, 12],
+      "spill_note": "Provisório — Defesa Civil de Indaial."
+    },
+    {
+      "id": "blumenau",
+      "name": "Blumenau",
+      "role": "target",
+      "lat": -26.9194,
+      "lon": -49.0661,
+      "zoom": 13.1,
+      "lag_to_target_h": 0,
+      "blurb": "Alvo operacional — régua e mancha no centro do vale",
+      "normal_stage_cm": 80,
+      "spill_stage_m": 8,
+      "spill_stage_min_m": 8,
+      "spill_stage_max_m": 17,
+      "spill_stage_stops_m": [8, 8.5, 10, 12, 14, 16, 17],
+      "spill_note": "Ponto de partida CEOPS/Defesa Civil: ruas ~8 m. Cheia de 2008 ~17 m. Confirmar régua local."
+    },
+    {
+      "id": "gaspar",
+      "name": "Gaspar",
+      "role": "downstream",
+      "lat": -26.931,
+      "lon": -48.959,
+      "zoom": 13,
+      "lag_to_target_h": -2,
+      "blurb": "Planície a jusante, ainda no Itajaí-Açu",
+      "normal_stage_cm": 50,
+      "spill_stage_m": 6.5,
+      "spill_stage_min_m": 5,
+      "spill_stage_max_m": 12,
+      "spill_stage_stops_m": [5, 6.5, 8, 10, 12],
+      "spill_note": "Planície a jusante — provisório. Não use a régua de 8–17 m de Blumenau."
+    },
+    {
+      "id": "ilhota",
+      "name": "Ilhota",
+      "role": "downstream",
+      "lat": -26.902,
+      "lon": -48.828,
+      "zoom": 12.9,
+      "lag_to_target_h": -3.5,
+      "blurb": "Baixo vale — áreas baixas junto ao canal",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 5,
+      "spill_stage_min_m": 3.5,
+      "spill_stage_max_m": 10,
+      "spill_stage_stops_m": [3.5, 5, 6.5, 8, 10],
+      "spill_note": "Áreas baixas — provisório. Transbordo mais cedo que em Blumenau."
+    },
+    {
+      "id": "itajai",
+      "name": "Itajaí",
+      "role": "estuary",
+      "lat": -26.9077,
+      "lon": -48.661,
+      "zoom": 12.7,
+      "lag_to_target_h": -5,
+      "blurb": "Foz no Atlântico (com Navegantes na outra margem)",
+      "normal_stage_cm": 30,
+      "spill_stage_m": 4,
+      "spill_stage_min_m": 2.5,
+      "spill_stage_max_m": 8,
+      "spill_stage_stops_m": [2.5, 3.5, 4, 5, 6, 8],
+      "spill_note": "Estuário (rio + maré) — provisório. A cota de Blumenau não se aplica na foz."
+    }
+  ],
+  "river_thalweg": [
+    [-49.643, -27.214],
+    [-49.56, -27.12],
+    [-49.518, -27.057],
+    [-49.45, -27.04],
+    [-49.39, -27.036],
+    [-49.3, -26.95],
+    [-49.232, -26.899],
+    [-49.14, -26.91],
+    [-49.066, -26.919],
+    [-48.959, -26.931],
+    [-48.828, -26.902],
+    [-48.661, -26.908]
+  ],
+  "reach_lags_h": [10, 9, 8, 6.5, 5, 3, 2, 1, 0, -2, -3.5],
+  "gauges": {
+    "provider": "ANA HidroWeb / ServiceANA telemetry",
+    "endpoint": "https://telemetriaws1.ana.gov.br/ServiceANA.asmx/DadosHidrometeorologicos",
+    "stations": [
+      {
+        "id": "rio-do-sul",
+        "name": "Estação Rio do Sul",
+        "code": "83250000",
+        "tracks": "alto vale / surto inicial"
+      },
+      {
+        "id": "ibirama",
+        "name": "Estação Ibirama",
+        "code": "83280000",
+        "tracks": "crista intermediária"
+      },
+      {
+        "id": "blumenau",
+        "name": "Estação Blumenau",
+        "code": "83300200",
+        "tracks": "telemetria no município-alvo (confirmar código no HidroWeb)"
+      },
+      {
+        "id": "gaspar",
+        "name": "Estação Gaspar",
+        "code": "83340000",
+        "tracks": "baixo vale"
+      }
+    ]
+  },
+  "hydro": {
+    "water_model": "lagged_unit_hydrograph",
+    "depth_formula": "stage_rise_m = upstream_rain_mm * rain_runoff_coeff + gauge_flow_m3s / valley_width_factor",
+    "rain_runoff_coeff": 0.05,
+    "valley_width_factor": 250,
+    "overbank_drain_h": 12,
+    "rain_storage_halflife_h": 12,
+    "normal_stage_cm": 80,
+    "spill_stage_m": 8,
+    "spill_stage_min_m": 8,
+    "spill_stage_max_m": 17,
+    "spill_stage_step_m": 0.5,
+    "spill_stage_stops_m": [8, 8.5, 10, 12, 14, 16, 17],
+    "regua_max_m": 20,
+    "upstream_city_ids": ["rio-do-sul", "ibirama", "apiuna", "indaial"],
+    "vertical_datum": "EGM96"
+  },
+  "copy": {
+    "cities_tip": "Eixo do Itajaí-Açu. Ao escolher, o mapa voa e a régua/transbordo passam aos valores iniciais daquela cidade. Pan no mapa atualiza pela cidade mais próxima. Tributários (Itajaí-Mirim, Benedito) ainda não estão no talvegue.",
+    "reset_tip": "Volta a régua ao nível natural (cota ANA ao vivo, ou o baseline do pacote), zera a chuva simulada e põe a janela no tempo típico Rio do Sul → Blumenau (~10 h). Calibre esse lag com a Defesa Civil.",
+    "spill_note": "Cota por município (Blumenau ~8 m; foz em Itajaí ~4 m — provisório). Segue o dropdown ou a vista do mapa.",
+    "target_short": "Blumenau",
+    "live_fallback": "sem telemetria — usando baseline de Blumenau",
+    "region_blurb": "O Itajaí-Açu concentra chuva do alto vale (Rio do Sul, Ibirama, Apiúna) na planície de Blumenau e segue a Gaspar, Ilhota e a foz em Itajaí. Pacote provisório: valide estações ANA e cotas antes de operação."
+  }
+}

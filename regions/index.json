@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "default_region": "tijucas",
+  "regions": [
+    {
+      "id": "tijucas",
+      "name": "Vale do Rio Tijucas",
+      "state": "SC",
+      "target": "São João Batista"
+    },
+    {
+      "id": "itajai",
+      "name": "Vale do Itajaí",
+      "state": "SC",
+      "target": "Blumenau"
+    }
+  ]
+}

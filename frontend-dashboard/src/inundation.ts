@@ -1,5 +1,5 @@
-import { viewCropRect, type LonLatBBox } from "./copernicusDem";
-import { REACH_LAGS_H, RIO_TIJUCAS, floodOccupancy } from "./hydro";
+import { type LonLatBBox } from "./copernicusDem";
+import { floodOccupancy, reachLagsH, riverThalweg } from "./hydro";
 
 export const DEPTH_SCALE: { cm: number; color: string; rgba: [number, number, number, number] }[] = [
   { cm: 10, color: "#D6F6FF", rgba: [214, 246, 255, 120] },
@@ -19,14 +19,20 @@ function isNoData(value: number): boolean {
   return !Number.isFinite(value) || value < -1000 || value > 9000;
 }
 
-export function colorForDepthM(depthM: number): [number, number, number, number] {
+export function depthScaleStop(
+  depthM: number,
+): (typeof DEPTH_SCALE)[number] | null {
   const cm = depthM * 100;
-  if (cm < DEPTH_SCALE[0].cm) return [0, 0, 0, 0];
+  if (cm < DEPTH_SCALE[0].cm) return null;
   let chosen = DEPTH_SCALE[0];
   for (const stop of DEPTH_SCALE) {
     if (cm >= stop.cm) chosen = stop;
   }
-  return chosen.rgba;
+  return chosen;
+}
+
+export function colorForDepthM(depthM: number): [number, number, number, number] {
+  return depthScaleStop(depthM)?.rgba ?? [0, 0, 0, 0];
 }
 
 function percentile(values: number[], p: number): number {
@@ -40,7 +46,8 @@ function percentile(values: number[], p: number): number {
 }
 
 function lagAt(vertex: number): number {
-  return REACH_LAGS_H[Math.min(Math.max(vertex, 0), REACH_LAGS_H.length - 1)] ?? 0;
+  const lags = reachLagsH();
+  return lags[Math.min(Math.max(vertex, 0), lags.length - 1)] ?? 0;
 }
 
 function toPixel(
@@ -123,8 +130,9 @@ function rasterizeRiver(
     }
   };
 
-  for (let s = 0; s < RIO_TIJUCAS.length - 1; s += 1) {
-    const clipped = clipSegmentToBbox(RIO_TIJUCAS[s], RIO_TIJUCAS[s + 1], bbox);
+  const line = riverThalweg();
+  for (let s = 0; s < line.length - 1; s += 1) {
+    const clipped = clipSegmentToBbox(line[s], line[s + 1], bbox);
     if (!clipped) continue;
     const a = toPixel(clipped[0][0], clipped[0][1], bbox, width, height);
     const b = toPixel(clipped[1][0], clipped[1][1], bbox, width, height);
@@ -143,10 +151,12 @@ function rasterizeRiver(
 const CONNECT_SLACK_M = 0.55;
 
 function nearestRiverLag(lon: number, lat: number): number {
-  let best = REACH_LAGS_H[0] ?? 0;
+  const line = riverThalweg();
+  const lags = reachLagsH();
+  let best = lags[0] ?? 0;
   let bestD = Infinity;
-  for (let i = 0; i < RIO_TIJUCAS.length; i += 1) {
-    const d = Math.hypot(RIO_TIJUCAS[i][0] - lon, RIO_TIJUCAS[i][1] - lat);
+  for (let i = 0; i < line.length; i += 1) {
+    const d = Math.hypot(line[i][0] - lon, line[i][1] - lat);
     if (d < bestD) {
       bestD = d;
       best = lagAt(i);
@@ -251,15 +261,8 @@ export async function renderSpillHeatmap(
     pixels[o + 3] = a;
   }
 
-  const cropTo = viewBbox ?? bbox;
-  const crop = viewCropRect(bbox, cropTo, width, height);
-  canvas.width = crop.cw;
-  canvas.height = crop.ch;
-  const cropped = new Uint8ClampedArray(crop.cw * crop.ch * 4);
-  for (let y = 0; y < crop.ch; y += 1) {
-    const srcOff = ((crop.y0 + y) * width + crop.x0) * 4;
-    cropped.set(pixels.subarray(srcOff, srcOff + crop.cw * 4), y * crop.cw * 4);
-  }
-  canvas.getContext("2d")?.putImageData(new ImageData(cropped, crop.cw, crop.ch), 0, 0);
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")?.putImageData(new ImageData(pixels, width, height), 0, 0);
   return canvas;
 }

@@ -1,12 +1,15 @@
-/** Vale do Rio Tijucas: Open-Meteo rain + ANA gauges → lagged flood corridor. */
+/** Open-Meteo rain + ANA gauges → lagged flood corridor (region pack). */
 
 import type { Feature, FeatureCollection } from "geojson";
+import { getRegion, surgeLagH } from "./region";
 
 export type CityRain = {
   id: string;
   name: string;
   lat: number;
   lon: number;
+  lag_to_target_h: number;
+  /** @deprecated alias of lag_to_target_h */
   lag_to_sjb_h: number;
   hourly_mm: number[];
   accum_3h_mm: number;
@@ -29,160 +32,68 @@ export type GaugeReading = {
 
 export type HydroSnapshot = {
   fetched_at: string;
+  region_id: string;
   upstream_rain_12h_mm: number;
   upstream_rain_3h_mm: number;
   upstream_rain_7d_mm: number;
   gauge_flow_m3s: number;
   gauge_stage_cm: number | null;
+  stage_rise_m: number;
+  /** @deprecated alias of stage_rise_m */
   stage_rise_sjb_m: number;
+  lag_surge_to_target_h: number;
+  /** @deprecated alias of lag_surge_to_target_h */
   lag_major_gercino_to_sjb_h: number;
   rainfall: CityRain[];
   gauges: GaugeReading[];
 };
 
-export const UPSTREAM_CATCHMENT_IDS = ["rancho-queimado", "angelina", "major-gercino"] as const;
-
-export const RAIN_COEFF = 0.05;
-export const VALLEY_WIDTH_FACTOR = 250;
-export const LAG_GERCINO_H = 4;
-/** Hours after local peak for overbank water to return to the channel. */
-export const OVERBANK_DRAIN_H = 12;
-/** Half-life of stored rain in the catchment (dry hours drain the flood bucket). */
-export const RAIN_STORAGE_HALFLIFE_H = 12;
-
-export const VALLEY_CITIES = [
-  { id: "rancho-queimado", name: "Rancho Queimado", lat: -27.6725, lon: -49.0217, lag_to_sjb_h: 8, role: "headwater" },
-  { id: "angelina", name: "Angelina", lat: -27.57, lon: -48.988, lag_to_sjb_h: 6, role: "upper_catchment" },
-  { id: "major-gercino", name: "Major Gercino", lat: -27.419, lon: -48.949, lag_to_sjb_h: 4, role: "surge_entry" },
-  { id: "nova-trento", name: "Nova Trento", lat: -27.286, lon: -48.93, lag_to_sjb_h: 2, role: "tributary_alferes" },
-  { id: "sao-joao-batista", name: "São João Batista", lat: -27.276, lon: -48.849, lag_to_sjb_h: 0, role: "target" },
-  { id: "canelinha", name: "Canelinha", lat: -27.265, lon: -48.812, lag_to_sjb_h: -1, role: "downstream" },
-  { id: "tijucas", name: "Tijucas", lat: -27.241, lon: -48.634, lag_to_sjb_h: -3, role: "estuary" },
-] as const;
-
-/** Cities along the SC-410 / Rio Tijucas runoff path, for map focus. */
-export const VALLEY_MAP_CITIES = [
-  {
-    id: "rancho-queimado",
-    name: "Rancho Queimado",
-    lat: -27.6725,
-    lon: -49.0217,
-    zoom: 12.5,
-    blurb: "Nascentes do Rio Tijucas (~800–1000 m)",
-  },
-  {
-    id: "angelina",
-    name: "Angelina",
-    lat: -27.57,
-    lon: -48.988,
-    zoom: 12.8,
-    blurb: "Captação do alto vale",
-  },
-  {
-    id: "major-gercino",
-    name: "Major Gercino",
-    lat: -27.419,
-    lon: -48.949,
-    zoom: 13,
-    blurb: "Posto de alerta a montante (SC-410)",
-  },
-  {
-    id: "nova-trento",
-    name: "Nova Trento",
-    lat: -27.286,
-    lon: -48.93,
-    zoom: 13,
-    blurb: "Ribeirão Alferes entra no vale acima de SJB",
-  },
-  {
-    id: "sao-joao-batista",
-    name: "São João Batista",
-    lat: -27.2761,
-    lon: -48.8494,
-    zoom: 13.3,
-    blurb: "Planície central — inflows combinados",
-  },
-  {
-    id: "canelinha",
-    name: "Canelinha",
-    lat: -27.265,
-    lon: -48.812,
-    zoom: 13.1,
-    blurb: "Planície intermediária a jusante",
-  },
-  {
-    id: "tijucas",
-    name: "Tijucas",
-    lat: -27.241,
-    lon: -48.634,
-    zoom: 12.9,
-    blurb: "Foz na BR-101 e no Atlântico",
-  },
-] as const;
-
-export const ANA_STATIONS = [
-  { id: "major-gercino", name: "Estação Major Gercino", code: "84097760", tracks: "surto inicial" },
-  { id: "nova-trento", name: "Estação Nova Trento", code: "84096000", tracks: "crista intermediária" },
-  { id: "sao-joao-batista", name: "Estação São João Batista", code: "84095500", tracks: "telemetria RHN ativa" },
-] as const;
-
-/** Simplified Rio Tijucas thalweg through the valley towns. */
-export const RIO_TIJUCAS: [number, number][] = [
-  [-49.0217, -27.6725],
-  [-49.02, -27.585],
-  [-48.988, -27.57],
-  [-48.97, -27.5],
-  [-48.949, -27.419],
-  [-48.94, -27.35],
-  [-48.93, -27.286],
-  [-48.9, -27.278],
-  [-48.87, -27.276],
-  [-48.849, -27.276],
-  [-48.83, -27.27],
-  [-48.812, -27.265],
-  [-48.76, -27.255],
-  [-48.7, -27.248],
-  [-48.634, -27.241],
-];
-
-export const REACH_LAGS_H = [8, 6, 6, 4, 3, 2, 1.5, 1, 0.4, 0, -0.5, -1, -2, -3];
-
-/** Typical low-flow staff at SJB (natural / in-bank), ~ANA 84095500. */
-export const SJB_NORMAL_STAGE_CM = 30;
-/** Régua max for simulation (cover a whole terrace even if 20 m is physically extreme). */
-export const REGUA_MAX_M = 20;
-export const REGUA_MAX_CM = REGUA_MAX_M * 100;
-
-/**
- * Staff-gauge reading (m) at which the Rio Tijucas starts flooding streets in
- * São João Batista. The slider zero is the natural in-bank level, not this
- * cota. Prefeitura / Defesa Civil: alagamentos a partir de 6 m.
- * Peaks: 6,85 m (maio/2024), ~9 m (dez/2022).
- */
-export const SJB_SPILL_STAGE_M = 6;
-export const SPILL_STAGE_MIN_M = 6;
-export const SPILL_STAGE_MAX_M = 8;
-export const SPILL_STAGE_STEP_M = 0.5;
-export const SPILL_STAGE_STOPS_M = [6, 6.5, 7, 7.5, 8] as const;
-
 /** Shortest upstream burst used to translate inland depth → rainfall intensity. */
 export const CRITICAL_RAIN_H = 3;
 
+export const HYDRO_TZ = "America/Sao_Paulo";
+
+export function rainCoeff(): number {
+  return getRegion().hydro.rain_runoff_coeff;
+}
+
+export function valleyWidthFactor(): number {
+  return getRegion().hydro.valley_width_factor;
+}
+
+export function overbankDrainH(): number {
+  return getRegion().hydro.overbank_drain_h;
+}
+
+export function rainStorageHalflifeH(): number {
+  return getRegion().hydro.rain_storage_halflife_h;
+}
+
+export function riverThalweg(): [number, number][] {
+  return getRegion().river_thalweg;
+}
+
+export function reachLagsH(): number[] {
+  return getRegion().reach_lags_h;
+}
+
 export function stageRiseM(rainMm: number, flowM3s: number): number {
-  return Math.max(0, rainMm * RAIN_COEFF + flowM3s / VALLEY_WIDTH_FACTOR);
+  return Math.max(0, rainMm * rainCoeff() + flowM3s / valleyWidthFactor());
 }
 
 /**
  * Fraction of peak overbank water still on the floodplain.
  * Rising limb until the local lag (wave coming down the valley), then linear
- * drain back into the bed over OVERBANK_DRAIN_H hours.
+ * drain back into the bed over overbank_drain_h hours.
  */
 export function floodOccupancy(hour: number, lagH: number): number {
+  const drain = overbankDrainH();
+  const surge = surgeLagH();
   const t = hour - lagH;
   if (t >= 0) {
-    return Math.max(0, 1 - t / OVERBANK_DRAIN_H);
+    return Math.max(0, 1 - t / drain);
   }
-  const riseH = Math.max(2, lagH > 0 ? lagH : LAG_GERCINO_H);
+  const riseH = Math.max(2, lagH > 0 ? lagH : surge);
   return Math.max(0, Math.min(1, 1 + t / riseH));
 }
 
@@ -192,13 +103,12 @@ export function riverArrival(hour: number, lagH: number): number {
 
 /**
  * Peak stored rain (mm) over `hours`, decaying every hour (half-life
- * RAIN_STORAGE_HALFLIFE_H). Two dry days empty most of the bucket, so flood
- * potential is not the 7-day arithmetic sum.
+ * from the region pack). Two dry days empty most of the bucket.
  */
 export function effectiveRainMm(hourly: number[], hours: number): number {
   const n = Math.min(hourly.length, Math.max(0, Math.round(hours)));
   if (n <= 0) return 0;
-  const decay = 0.5 ** (1 / RAIN_STORAGE_HALFLIFE_H);
+  const decay = 0.5 ** (1 / rainStorageHalflifeH());
   let store = 0;
   let peak = 0;
   for (let i = 0; i < n; i += 1) {
@@ -215,8 +125,8 @@ export function grossRainMm(hourly: number[], hours: number): number {
 
 /** Accumulated rain (mm) for a staff reading, given current valley flow. */
 export function rainMmForStaffM(staffM: number, flowM3s: number): number {
-  const fromFlow = Math.max(0, flowM3s) / VALLEY_WIDTH_FACTOR;
-  return Math.max(0, (staffM - fromFlow) / RAIN_COEFF);
+  const fromFlow = Math.max(0, flowM3s) / valleyWidthFactor();
+  return Math.max(0, (staffM - fromFlow) / rainCoeff());
 }
 
 /**
@@ -226,7 +136,7 @@ export function rainMmForStaffM(staffM: number, flowM3s: number): number {
 export function rainMmPerHourForInlandCm(
   inlandCm: number,
   flowM3s: number,
-  spillStageM: number = SJB_SPILL_STAGE_M,
+  spillStageM: number = getRegion().hydro.spill_stage_m,
 ): number {
   const staffM = spillStageM + inlandCm / 100;
   return rainMmForStaffM(staffM, flowM3s) / CRITICAL_RAIN_H;
@@ -271,8 +181,9 @@ async function fetchAnaStation(code: string, signal?: AbortSignal): Promise<{
 }
 
 async function fetchOpenMeteo(signal?: AbortSignal): Promise<CityRain[]> {
-  const latitude = VALLEY_CITIES.map((c) => c.lat).join(",");
-  const longitude = VALLEY_CITIES.map((c) => c.lon).join(",");
+  const cities = getRegion().cities;
+  const latitude = cities.map((c) => c.lat).join(",");
+  const longitude = cities.map((c) => c.lon).join(",");
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
     `&hourly=precipitation&forecast_days=7&timezone=America%2FSao_Paulo`;
@@ -280,7 +191,7 @@ async function fetchOpenMeteo(signal?: AbortSignal): Promise<CityRain[]> {
   if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
   const body: unknown = await res.json();
   const blocks = Array.isArray(body) ? body : [body];
-  return VALLEY_CITIES.map((city, i) => {
+  return cities.map((city, i) => {
     const block = blocks[i] as { hourly?: { precipitation?: (number | null)[] } };
     const hourly = (block.hourly?.precipitation ?? []).map((v) => Number(v || 0));
     return {
@@ -288,7 +199,8 @@ async function fetchOpenMeteo(signal?: AbortSignal): Promise<CityRain[]> {
       name: city.name,
       lat: city.lat,
       lon: city.lon,
-      lag_to_sjb_h: city.lag_to_sjb_h,
+      lag_to_target_h: city.lag_to_target_h,
+      lag_to_sjb_h: city.lag_to_target_h,
       hourly_mm: hourly,
       accum_3h_mm: round2(hourly.slice(0, 3).reduce((a, b) => a + b, 0)),
       accum_6h_mm: round2(hourly.slice(0, 6).reduce((a, b) => a + b, 0)),
@@ -306,21 +218,26 @@ function accumHours(city: CityRain, hours: number): number {
   return effectiveRainMm(city.hourly_mm, hours);
 }
 
+function upstreamRain(rainfall: CityRain[]): CityRain[] {
+  const ids = new Set(getRegion().hydro.upstream_city_ids);
+  const upstream = rainfall.filter((r) => ids.has(r.id));
+  return upstream.length ? upstream : rainfall;
+}
+
 function meanUpstreamMetric(
   snapshot: HydroSnapshot,
   metric: (city: CityRain) => number,
 ): number {
-  const upstream = snapshot.rainfall.filter((r) =>
-    (UPSTREAM_CATCHMENT_IDS as readonly string[]).includes(r.id),
-  );
+  const upstream = upstreamRain(snapshot.rainfall);
   if (!upstream.length) return 0;
   return round2(upstream.reduce((s, r) => s + metric(r), 0) / upstream.length);
 }
 
 export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnapshot> {
+  const pack = getRegion();
   const rainfall = await fetchOpenMeteo(signal);
   const gauges: GaugeReading[] = [];
-  for (const station of ANA_STATIONS) {
+  for (const station of pack.gauges.stations) {
     try {
       const reading = await fetchAnaStation(station.code, signal);
       gauges.push({ ...station, ...reading });
@@ -336,30 +253,32 @@ export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnap
   }
 
   const live = gauges.filter((g) => g.online && g.flow_m3s != null);
-  const sjb = gauges.find((g) => g.id === "sao-joao-batista");
-  const flow = live.at(-1)?.flow_m3s ?? sjb?.flow_m3s ?? 0;
+  const targetGauge = gauges.find((g) => g.id === pack.live_gauge_id);
+  const flow = live.at(-1)?.flow_m3s ?? targetGauge?.flow_m3s ?? 0;
   const stageCm = [...live].reverse().find((g) => g.stage_cm != null)?.stage_cm ?? null;
 
-  const upstream = rainfall.filter((r) =>
-    (UPSTREAM_CATCHMENT_IDS as readonly string[]).includes(r.id),
-  );
+  const upstream = upstreamRain(rainfall);
   const rain12 =
     upstream.reduce((s, r) => s + r.accum_12h_mm, 0) / Math.max(upstream.length, 1);
   const rain3 =
     upstream.reduce((s, r) => s + r.accum_3h_mm, 0) / Math.max(upstream.length, 1);
-
   const rain7 =
     upstream.reduce((s, r) => s + effectiveRainMm(r.hourly_mm, 168), 0) / Math.max(upstream.length, 1);
 
+  const rise = round2(stageRiseM(rain12, flow));
+  const lag = surgeLagH(pack);
   return {
     fetched_at: new Date().toISOString(),
+    region_id: pack.id,
     upstream_rain_12h_mm: round2(rain12),
     upstream_rain_3h_mm: round2(rain3),
     upstream_rain_7d_mm: round2(rain7),
     gauge_flow_m3s: flow,
     gauge_stage_cm: stageCm,
-    stage_rise_sjb_m: round2(stageRiseM(rain12, flow)),
-    lag_major_gercino_to_sjb_h: LAG_GERCINO_H,
+    stage_rise_m: rise,
+    stage_rise_sjb_m: rise,
+    lag_surge_to_target_h: lag,
+    lag_major_gercino_to_sjb_h: lag,
     rainfall,
     gauges,
   };
@@ -387,9 +306,7 @@ function offsetPolygon(
 export function rainForHorizon(snapshot: HydroSnapshot | null, hours: number, overrideMm?: number): number {
   if (overrideMm != null && Number.isFinite(overrideMm)) return overrideMm;
   if (!snapshot) return 0;
-  const upstream = snapshot.rainfall.filter((r) =>
-    (UPSTREAM_CATCHMENT_IDS as readonly string[]).includes(r.id),
-  );
+  const upstream = upstreamRain(snapshot.rainfall);
   if (!upstream.length) return snapshot.upstream_rain_12h_mm;
   return round2(upstream.reduce((s, r) => s + accumHours(r, hours), 0) / upstream.length);
 }
@@ -410,11 +327,9 @@ export function grossRainForForecastDays(snapshot: HydroSnapshot | null, days: n
 /** Predicted staff (m above bed) after `days` of forecast rain, from current ANA stage. */
 export function forecastStaffM(snapshot: HydroSnapshot | null, days: number): number {
   const rainMm = rainForForecastDays(snapshot, days);
-  const currentM = (snapshot?.gauge_stage_cm ?? SJB_NORMAL_STAGE_CM) / 100;
-  return Math.max(0, currentM + rainMm * RAIN_COEFF);
+  const currentM = (snapshot?.gauge_stage_cm ?? getRegion().hydro.normal_stage_cm) / 100;
+  return Math.max(0, currentM + rainMm * rainCoeff());
 }
-
-export const HYDRO_TZ = "America/Sao_Paulo";
 
 function saoPauloYmd(from: Date): { y: number; m: number; d: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -445,7 +360,7 @@ function saoPauloHour(from: Date): number {
 
 /**
  * Hours of Open-Meteo series to include for a 1–7 slider that starts today.
- * Day 1 = restante de hoje; day 7 = hoje até o 7º dia (ex.: terça 8 → segunda 14).
+ * Day 1 = restante de hoje; day 7 = hoje até o 7º dia.
  */
 export function forecastHorizonHours(days: number, from = new Date()): number {
   const n = Math.max(1, Math.round(days));
@@ -478,9 +393,11 @@ export function buildFloodGeoJSON(
   hour: number,
   uniform = false,
 ): FeatureCollection {
+  const line = riverThalweg();
+  const lags = reachLagsH();
   const features: Feature[] = [];
-  for (let i = 0; i < RIO_TIJUCAS.length - 1; i += 1) {
-    const lag = REACH_LAGS_H[i] ?? 0;
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const lag = lags[i] ?? 0;
     const depth = uniform
       ? stageRiseMValue
       : stageRiseMValue * riverArrival(hour, lag);
@@ -490,20 +407,21 @@ export function buildFloodGeoJSON(
     features.push({
       type: "Feature",
       properties: { depth_m: round2(depth), depth_band: depthBand, lag_h: lag },
-      geometry: { type: "Polygon", coordinates: [offsetPolygon(RIO_TIJUCAS[i], RIO_TIJUCAS[i + 1], half)] },
+      geometry: { type: "Polygon", coordinates: [offsetPolygon(line[i], line[i + 1], half)] },
     });
   }
   return { type: "FeatureCollection", features };
 }
 
 export function riverLineGeoJSON(): FeatureCollection {
+  const pack = getRegion();
   return {
     type: "FeatureCollection",
     features: [
       {
         type: "Feature",
-        properties: { name: "Rio Tijucas" },
-        geometry: { type: "LineString", coordinates: RIO_TIJUCAS },
+        properties: { name: pack.river_name },
+        geometry: { type: "LineString", coordinates: pack.river_thalweg },
       },
     ],
   };
@@ -512,9 +430,9 @@ export function riverLineGeoJSON(): FeatureCollection {
 export function cityPointsGeoJSON(): FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: VALLEY_CITIES.map((c) => ({
+    features: getRegion().cities.map((c) => ({
       type: "Feature",
-      properties: { name: c.name, lag_h: c.lag_to_sjb_h, role: c.role },
+      properties: { name: c.name, lag_h: c.lag_to_target_h, role: c.role },
       geometry: { type: "Point", coordinates: [c.lon, c.lat] },
     })),
   };

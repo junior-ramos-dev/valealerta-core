@@ -2,7 +2,7 @@
 
 O **Vale Alerta** é uma plataforma web interativa, de código aberto e ultra-leve, desenvolvida para traduzir previsões meteorológicas complexas em informações visuais simples, práticas e acionáveis para o cidadão comum.
 
-Focado inicialmente na bacia do **Vale do Rio Tijucas** (envolvendo as cidades de **Rancho Queimado**, **Angelina**, **Major Gercino**, **Nova Trento**, **São João Batista**, **Canelinha** e **Tijucas**), o projeto foi arquitetado de forma **independente de localização**. Qualquer desenvolvedor no mundo pode clonar este repositório, alterar as coordenadas no arquivo de configuração e implantar a ferramenta para sua própria comunidade ou bacia hidrográfica.
+Focado inicialmente na bacia do **Vale do Rio Tijucas** (Rancho Queimado, Angelina, Major Gercino, Nova Trento, São João Batista, Canelinha e Tijucas), o motor é **independente de localização**. Novas bacias entram como JSON em `regions/` — o **Vale do Itajaí** já está como segundo pacote (provisório). Veja `CONTRIBUTING.md`.
 
 ---
 
@@ -74,8 +74,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 ### Mapa híbrido e navegação
 
 - Mapa **Esri World Imagery** + rótulos transparentes **CARTO Positron Labels**, com MapLibre GL JS.
-- Linha do **Rio Tijucas** (talvegue simplificado Angelina/Rancho Queimado → foz em Tijucas) e pontos das cidades do vale.
-- Seletor **Município do vale**: voa até Rancho Queimado, Angelina, Major Gercino, Nova Trento, São João Batista, Canelinha ou Tijucas, **mantendo os sliders atuais**.
+- Seletor **Bacia**: Tijucas ou Itajaí. **Município do vale**: voa até a cidade e aplica a **régua e o transbordo iniciais daquele município**. Pan/zoom atualizam a cota pela cidade mais próxima da vista (se você já mexeu na régua, ela permanece).
 - Após pan, zoom ou troca de cidade, o app **espera 1 segundo** e recarrega relevo + heatmap para a **área visível** (com ~2 km de folga no grid de inundação para o rio não “sair” da malha).
 - Badge no mapa com o **dia da semana** e se a mancha é Agora ou Previsão; lâmpadas verde/vermelha nos sliders indicam qual camada está viva.
 - Ícones **i** em cada controle: a explicação aparece ao passar o mouse.
@@ -93,6 +92,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 - Preenchimento hidrológico a partir do rio (flood-fill) para células abaixo dessa cota, com folga (~0,55 m) para ruído do DSM.
 - Cores por profundidade **local**: **10, 25, 50, 75, 100 … 250 cm**.
 - Só **uma** mancha por vez: arrastar a régua pinta **Agora**; arrastar os dias Open-Meteo pinta **Previsão**. As duas nunca se sobrepõem.
+- O overlay fica **georreferenciado** na malha do DEM (vista + ~2 km de folga). Pan e zoom acompanham heatmap e relevo. Depois de 1 s parado, os dois são recalculados na vista nova — a mancha não fica cortada no recorte do zoom anterior.
 
 ### Régua do rio e cota de transbordo
 
@@ -123,13 +123,14 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 ### Tempo real (ANA × Open-Meteo)
 
-- Aba **Tempo Real**: cruza Open-Meteo × telemetria **ANA HidroWeb** (Major Gercino `84097760`, Nova Trento `84096000`, São João Batista `84095500`).
-- Mostra vazão/cota por estação, chuva efetiva vs. bruta e o lag configurado Major Gercino → SJB.
-- O simulador (régua, previsão, heatmap) continua usando o mesmo cruzamento; a aba só explicita a telemetria.
+- Checkbox **Tempo Real**: ligado, mostra a cota ANA e ela vira o **mínimo** da régua (dá para simular acima, não abaixo). Desligado, a régua é livre desde 0.
+- **Resetar para condições normais**: com o checkbox ligado, volta à cota ANA ao vivo (ex.: 2 m se o rio já subiu); desligado, volta ao nível natural do município.
+- Telemetria **ANA HidroWeb** (estações do pacote da bacia) e chuva Open-Meteo.
 
 ### Sonda do terreno
 
 - Mover o cursor no mapa mostra lat/lon e o **z do GLO-30** no ponto (amostra bilinear).
+- Sobre a mancha, um **box no ponteiro** mostra profundidade em **cm** (cor da faixa) e **mm/h** da legenda.
 - Clique **fixa** o pino. Painel: cota do terreno, régua, talvegue, cota da água (WSE) e se o ponto está acima ou abaixo da lâmina.
 - Aviso no painel: aterro recente pode **não** estar no GLO-30 — use a correção de relevo se a obra for conhecida.
 
@@ -141,15 +142,17 @@ O Copernicus não “vê” obra de ontem. Quem tem autorização pode **somar u
 
 - O formulário fica no **fim da barra lateral**. Sem login, só aparece o pedido de autenticação. Conta dummy provisória (até existir login de verdade): usuário `usuario`, senha `123`. Sessão nesta aba do browser; **Sair** encerra.
 - Fluxo: **Demarcar área** → vértices no mapa (mínimo 3; clique num ponto para tirá-lo; desfazer último ponto) → Δz em metros → **Aplicar Δz**. Dá para nomear, modificar, remover e **baixar GeoJSON**.
-- Patches **locais** ficam no `localStorage` do browser. O arquivo canônico versionado é `backend-satellite/topo_patches/patches.geojson` (Vite serve em `/topo_patches.geojson`).
+- Patches **locais** ficam no `localStorage` **por bacia**. O arquivo canônico versionado é `regions/<id>.patches.geojson` (Vite serve em `/regions/<id>.patches.geojson`).
 - A correção entra na malha **antes** do hillshade e do flood-fill (`copernicusDem.ts` + `topoPatches.ts`).
 - **Absorção pelo DEM:** na criação, o app grava a cota média Copernicus **crua** dentro do polígono. A cada carga do relevo, compara com a média atual. Se o terreno já subiu ~Δz, o patch é marcado **absorvido** e **não é somado** (evita contar a obra duas vezes quando o GLO-30 atualizar). Se a cota mudou de outro jeito, pede **revisão**. Dá para **somar mesmo assim** ou remover. Folga grande de propósito: o GLO-30 erra com frequência 2–4 m na vertical.
 
 ### Backend e configuração regional
 
-- `backend-satellite/config.json`: bbox, cidades, lags, fórmula e cota de transbordo — ponto único para **reapontar o simulador a outra bacia**.
-- `python3 backend-satellite/fetch_hydro.py`: baixa Open-Meteo (7 dias) + ANA e grava `data/hydro_now.json` (e `frontend-dashboard/public/hydro_now.json` se existir).
-- Plugin Vite: `GET /topo_patches.geojson` lê `backend-satellite/topo_patches/patches.geojson`.
+- `regions/<id>.json`: fonte única da bacia (cidades, talvegue, lags, ANA, régua, textos). Catálogo em `regions/index.json`.
+- `backend-satellite/config.json`: só o `default_region` para o cron Python.
+- `python3 backend-satellite/fetch_hydro.py` (ou `VALEALERTA_REGION=itajai …`): Open-Meteo 7 dias + ANA → `data/hydro_now.json`.
+- Plugin Vite: `GET /regions/*` lê a pasta `regions/`.
+- Como criar outra bacia: **`CONTRIBUTING.md`**.
 - `backend-database/migrations.sql`: esquema PostGIS/Supabase para **perfis** e **pins de risco comunitário** (estrutura pronta; o mapa cidadão ainda não consome esses pins).
 
 ---
@@ -195,7 +198,7 @@ O diagrama abaixo descreve a **visão-alvo** do produto (radar Sentinel-1, Supab
 | Altitude / hillshade / inundação | **Copernicus DEM GLO-30** (30 m, COG no S3 `copernicus-dem-30m`, catálogo CDSE) | Proxy Vite `/copernicus-dem`; leitura GeoTIFF no browser (`geotiff`) |
 | Chuva prevista 7 dias | **Open-Meteo Forecast API** (`hourly=precipitation`, `forecast_days=7`, sem API key; modelos GFS, ECMWF e outros) | `frontend-dashboard/src/hydro.ts` e `fetch_hydro.py` |
 | Cota e vazão | **ANA HidroWeb** — `ServiceANA.asmx/DadosHidrometeorologicos` | Proxy Vite `/ana-hidro` |
-| Cota de transbordo SJB | **Defesa Civil / Prefeitura de São João Batista**; picos **SDR/SC** e **Epagri/Ciram** | Constante `sjb_spill_stage_m = 6` em `config.json` / `hydro.ts` |
+| Cota de transbordo | Defesa Civil / CEOPS **de cada município** | `cities[].spill_stage_m` em `regions/<id>.json` (fallback `hydro.spill_stage_*`) |
 | Esquema espacial | **PostGIS** (Supabase) | `backend-database/migrations.sql` |
 | Radar de validação | **Sentinel-1 SAR (ESA / CDSE)** | Planejado (não no dashboard atual) |
 | Terrain-RGB (MapTiler/AWS) | Tiles Terrarium | Fonte declarada no estilo; o overlay operacional é o GLO-30 |
@@ -226,29 +229,29 @@ Endpoints úteis:
 ```text
 valealerta-core/
 ├── README.md
+├── CONTRIBUTING.md          # Como adicionar bacias
+├── regions/
+│   ├── index.json           # Catálogo
+│   ├── tijucas.json         # Pacote Vale do Rio Tijucas
+│   ├── itajai.json          # Pacote Vale do Itajaí (provisório)
+│   └── *.patches.geojson
 ├── backend-satellite/
-│   ├── config.json          # Bacia, cidades, lags, fórmula, cota 6 m
-│   ├── fetch_hydro.py       # Open-Meteo 7d + ANA → hydro_now.json
-│   ├── topo_patches/patches.geojson  # Correções Δz canônicas
+│   ├── config.json          # default_region
+│   ├── fetch_hydro.py
 │   └── data/hydro_now.json
 ├── backend-database/
-│   └── migrations.sql       # profiles + hazard_pins (PostGIS / RLS)
+│   └── migrations.sql
 └── frontend-dashboard/
     ├── README.md
-    ├── vite.config.ts       # Proxies Copernicus e ANA + /topo_patches.geojson
-    ├── public/hydro_now.json
+    ├── vite.config.ts       # Proxies + /regions/*
     └── src/
-        ├── App.tsx          # Mapa, abas, sliders, camadas, demarcação
-        ├── InfoTip.tsx      # Ícones de ajuda
-        ├── PatchLoginForm.tsx
-        ├── dummyAuth.ts     # Login provisório da demarcação
-        ├── copernicusDem.ts # COG GLO-30 + hillshade + patches
-        ├── topoPatches.ts   # GeoJSON Δz, absorção pelo DEM
-        ├── inundation.ts    # Heatmap de profundidade
-        └── hydro.ts         # Open-Meteo, ANA, cidades, régua
+        ├── region.ts        # Loader dos pacotes
+        ├── App.tsx
+        ├── hydro.ts         # Motor (lê o pacote ativo)
+        └── inundation.ts
 ```
 
-Para outra região: edite `backend-satellite/config.json` e as constantes de cidades / talvegue em `frontend-dashboard/src/hydro.ts`.
+Para outra região: copie um JSON em `regions/` e registre-o em `index.json` (`CONTRIBUTING.md`). Não edite constantes de cidade em TypeScript.
 
 ---
 

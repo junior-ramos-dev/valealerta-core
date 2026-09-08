@@ -1,0 +1,209 @@
+{
+  "schema": 1,
+  "id": "tijucas",
+  "title": "Vale Alerta para Enchentes",
+  "subtitle": "Vale do Rio Tijucas — simulador de escoamento",
+  "river_name": "Rio Tijucas",
+  "target_city_id": "sao-joao-batista",
+  "surge_city_id": "major-gercino",
+  "live_gauge_id": "sao-joao-batista",
+  "calibration": {
+    "status": "calibrated",
+    "benchmark_events": ["2022-12 ~9 m", "2024-05 6,85 m"],
+    "note": "Cota de transbordo 6 m: Defesa Civil de São João Batista. Picos SDR/SC e Epagri/Ciram."
+  },
+  "region": {
+    "name": "Vale do Rio Tijucas, SC, Brazil",
+    "valley": "Rio Tijucas",
+    "crs": "EPSG:4326",
+    "bbox": {
+      "south": -27.72,
+      "west": -49.08,
+      "north": -27.2,
+      "east": -48.58
+    },
+    "center": { "lat": -27.2761, "lon": -48.8494 },
+    "default_zoom": 13.2
+  },
+  "cities": [
+    {
+      "id": "rancho-queimado",
+      "name": "Rancho Queimado",
+      "role": "headwater",
+      "lat": -27.6725,
+      "lon": -49.0217,
+      "zoom": 12.5,
+      "lag_to_target_h": 8,
+      "blurb": "Nascentes do Rio Tijucas (~800–1000 m)",
+      "normal_stage_cm": 20,
+      "spill_stage_m": 8,
+      "spill_stage_min_m": 6,
+      "spill_stage_max_m": 10,
+      "spill_stage_stops_m": [6, 7, 8, 9, 10],
+      "spill_note": "Vale encaixado — provisório. Confirme com a Defesa Civil local."
+    },
+    {
+      "id": "angelina",
+      "name": "Angelina",
+      "role": "upper_catchment",
+      "lat": -27.57,
+      "lon": -48.988,
+      "zoom": 12.8,
+      "lag_to_target_h": 6,
+      "blurb": "Captação do alto vale",
+      "normal_stage_cm": 25,
+      "spill_stage_m": 7,
+      "spill_stage_min_m": 5.5,
+      "spill_stage_max_m": 9,
+      "spill_stage_stops_m": [5.5, 6, 7, 8, 9],
+      "spill_note": "Alto vale — provisório."
+    },
+    {
+      "id": "major-gercino",
+      "name": "Major Gercino",
+      "role": "surge_entry",
+      "lat": -27.419,
+      "lon": -48.949,
+      "zoom": 13,
+      "lag_to_target_h": 4,
+      "blurb": "Posto de alerta a montante (SC-410)",
+      "normal_stage_cm": 30,
+      "spill_stage_m": 6.5,
+      "spill_stage_min_m": 5.5,
+      "spill_stage_max_m": 8,
+      "spill_stage_stops_m": [5.5, 6, 6.5, 7, 8],
+      "spill_note": "Vale estreito a montante de SJB — provisório."
+    },
+    {
+      "id": "nova-trento",
+      "name": "Nova Trento",
+      "role": "tributary",
+      "lat": -27.286,
+      "lon": -48.93,
+      "zoom": 13,
+      "lag_to_target_h": 2,
+      "blurb": "Ribeirão Alferes entra no vale acima de SJB",
+      "normal_stage_cm": 30,
+      "spill_stage_m": 5.5,
+      "spill_stage_min_m": 4.5,
+      "spill_stage_max_m": 7.5,
+      "spill_stage_stops_m": [4.5, 5, 5.5, 6, 6.5, 7.5],
+      "spill_note": "Planície do Alferes — provisório."
+    },
+    {
+      "id": "sao-joao-batista",
+      "name": "São João Batista",
+      "role": "target",
+      "lat": -27.2761,
+      "lon": -48.8494,
+      "zoom": 13.3,
+      "lag_to_target_h": 0,
+      "blurb": "Planície central — inflows combinados",
+      "normal_stage_cm": 30,
+      "spill_stage_m": 6,
+      "spill_stage_min_m": 6,
+      "spill_stage_max_m": 8,
+      "spill_stage_stops_m": [6, 6.5, 7, 7.5, 8],
+      "spill_note": "Defesa Civil SJB: ruas a partir de 6 m. Picos: 6,85 m (maio/2024) e ~9 m (dez/2022)."
+    },
+    {
+      "id": "canelinha",
+      "name": "Canelinha",
+      "role": "downstream",
+      "lat": -27.265,
+      "lon": -48.812,
+      "zoom": 13.1,
+      "lag_to_target_h": -1,
+      "blurb": "Planície intermediária a jusante",
+      "normal_stage_cm": 25,
+      "spill_stage_m": 4.5,
+      "spill_stage_min_m": 3.5,
+      "spill_stage_max_m": 6.5,
+      "spill_stage_stops_m": [3.5, 4, 4.5, 5, 5.5, 6.5],
+      "spill_note": "Planície a jusante de SJB — provisório. Não use os 6 m de São João Batista."
+    },
+    {
+      "id": "tijucas",
+      "name": "Tijucas",
+      "role": "estuary",
+      "lat": -27.241,
+      "lon": -48.634,
+      "zoom": 12.9,
+      "lag_to_target_h": -3,
+      "blurb": "Foz na BR-101 e no Atlântico",
+      "normal_stage_cm": 20,
+      "spill_stage_m": 3.5,
+      "spill_stage_min_m": 2.5,
+      "spill_stage_max_m": 5.5,
+      "spill_stage_stops_m": [2.5, 3, 3.5, 4, 4.5, 5, 5.5],
+      "spill_note": "Estuário — provisório (maré + rio). A cota de 6 m de SJB não se aplica aqui."
+    }
+  ],
+  "river_thalweg": [
+    [-49.0217, -27.6725],
+    [-49.02, -27.585],
+    [-48.988, -27.57],
+    [-48.97, -27.5],
+    [-48.949, -27.419],
+    [-48.94, -27.35],
+    [-48.93, -27.286],
+    [-48.9, -27.278],
+    [-48.87, -27.276],
+    [-48.849, -27.276],
+    [-48.83, -27.27],
+    [-48.812, -27.265],
+    [-48.76, -27.255],
+    [-48.7, -27.248],
+    [-48.634, -27.241]
+  ],
+  "reach_lags_h": [8, 6, 6, 4, 3, 2, 1.5, 1, 0.4, 0, -0.5, -1, -2, -3],
+  "gauges": {
+    "provider": "ANA HidroWeb / ServiceANA telemetry",
+    "endpoint": "https://telemetriaws1.ana.gov.br/ServiceANA.asmx/DadosHidrometeorologicos",
+    "stations": [
+      {
+        "id": "major-gercino",
+        "name": "Estação Major Gercino",
+        "code": "84097760",
+        "tracks": "surto inicial"
+      },
+      {
+        "id": "nova-trento",
+        "name": "Estação Nova Trento",
+        "code": "84096000",
+        "tracks": "crista intermediária"
+      },
+      {
+        "id": "sao-joao-batista",
+        "name": "Estação São João Batista",
+        "code": "84095500",
+        "tracks": "telemetria RHN ativa"
+      }
+    ]
+  },
+  "hydro": {
+    "water_model": "lagged_unit_hydrograph",
+    "depth_formula": "stage_rise_m = upstream_rain_mm * rain_runoff_coeff + gauge_flow_m3s / valley_width_factor",
+    "rain_runoff_coeff": 0.05,
+    "valley_width_factor": 250,
+    "overbank_drain_h": 12,
+    "rain_storage_halflife_h": 12,
+    "normal_stage_cm": 30,
+    "spill_stage_m": 6,
+    "spill_stage_min_m": 6,
+    "spill_stage_max_m": 8,
+    "spill_stage_step_m": 0.5,
+    "spill_stage_stops_m": [6, 6.5, 7, 7.5, 8],
+    "regua_max_m": 20,
+    "upstream_city_ids": ["rancho-queimado", "angelina", "major-gercino"],
+    "vertical_datum": "EGM96"
+  },
+  "copy": {
+    "cities_tip": "Cidades do caminho de escoamento do Rio Tijucas (SC-410). Ao escolher, o mapa voa até o município, a régua e a cota de transbordo passam aos valores iniciais daquela cidade. Pan no mapa faz o mesmo pela cidade mais próxima da vista.",
+    "reset_tip": "Volta a régua ao nível natural (cota ANA ao vivo, ou ~30 cm), zera a chuva simulada e põe a janela no tempo típico da onda de Major Gercino até São João Batista.",
+    "spill_note": "A cota “sai da calha” é por município (SJB 6 m calibrado; Tijucas ~3,5 m provisório). Segue o dropdown ou a cidade mais próxima da vista.",
+    "target_short": "SJB",
+    "live_fallback": "sem telemetria — usando baseline do município-alvo",
+    "region_blurb": "O Vale do Rio Tijucas funciona como funil: chuva em Rancho Queimado, Angelina e Major Gercino desce até a planície de São João Batista."
+  }
+}

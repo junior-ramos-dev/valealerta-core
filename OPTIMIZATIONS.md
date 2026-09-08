@@ -87,7 +87,7 @@ O GeoTIFF local **substitui ou soma** no recorte; o resto da bacia continua GLO-
 4. Correções deste browser ficam no `localStorage`; **Baixar GeoJSON** para versionar no repositório.
 5. Pins verificados no PostGIS continuam o passo seguinte (ainda não ligados).
 
-Ponto natural de configuração: `backend-satellite/config.json` (lista de patches) e/ou `backend-database/migrations.sql` (geometria versionada).
+Ponto natural de configuração: `regions/<id>.patches.geojson` e/ou `backend-database/migrations.sql` (geometria versionada).
 
 ---
 

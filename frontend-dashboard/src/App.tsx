@@ -8,9 +8,9 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   bboxFromViewport,
+  bboxToCoordinates,
   loadCopernicusTopoOverlay,
   sampleElevationM,
-  viewportCoordinates,
   type CopernicusTopoOverlay,
 } from "./copernicusDem";
 import {
@@ -23,24 +23,28 @@ import {
   floodOccupancy,
   effectiveRainMm,
   riverLineGeoJSON,
-  SJB_SPILL_STAGE_M,
-  SJB_NORMAL_STAGE_CM,
-  SPILL_STAGE_MIN_M,
-  SPILL_STAGE_MAX_M,
-  SPILL_STAGE_STOPS_M,
-  REGUA_MAX_M,
-  REGUA_MAX_CM,
   CRITICAL_RAIN_H,
-  OVERBANK_DRAIN_H,
-  VALLEY_MAP_CITIES,
   forecastHorizonLabel,
   forecastHorizonHours,
   todayHorizonLabel,
   type HydroSnapshot,
 } from "./hydro";
 import {
+  bootstrapRegion,
+  getRegion,
+  loadRegionPack,
+  nearestCity,
+  setActiveRegion,
+  staffForCity,
+  storeRegionId,
+  surgeLagH,
+  type RegionCatalog,
+  type RegionPack,
+} from "./region";
+import {
   renderSpillHeatmap,
   DEPTH_SCALE,
+  depthScaleStop,
   estimateChannelThalwegM,
 } from "./inundation";
 import {
@@ -96,6 +100,12 @@ function patchDemCaption(p: {
   return `ativo no modelo${zBit}`;
 }
 
+function liveStageCm(hydro: HydroSnapshot | null): number | null {
+  const v = hydro?.gauge_stage_cm;
+  if (v == null || !Number.isFinite(v) || v < 0) return null;
+  return Math.round(v);
+}
+
 function LayerLamp({ on, liveLabel }: { on: boolean; liveLabel: string }) {
   return (
     <span
@@ -108,7 +118,6 @@ function LayerLamp({ on, liveLabel }: { on: boolean; liveLabel: string }) {
   );
 }
 
-const SJB_COORDS: [number, number] = [-48.8494, -27.2761];
 const VIEWPORT_SETTLE_MS = 1000;
 
 const ESRI_IMAGERY_URL =
@@ -124,6 +133,9 @@ const CARTO_LABEL_URLS = [
 export default function App() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
+  const [region, setRegion] = useState<RegionPack | null>(null);
+  const [catalog, setCatalog] = useState<RegionCatalog | null>(null);
+  const [regionError, setRegionError] = useState<string | null>(null);
 
   const [timeWindow, setTimeWindow] = useState<number>(4);
   const [forecastDays, setForecastDays] = useState<number>(3);
@@ -133,21 +145,30 @@ export default function App() {
     "settling" | "loading" | "ready" | "error"
   >("loading");
   const [topoMeta, setTopoMeta] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"simulador" | "live">("simulador");
+  const [liveRiver, setLiveRiver] = useState(false);
   const [hydro, setHydro] = useState<HydroSnapshot | null>(null);
   const [hydroError, setHydroError] = useState<string | null>(null);
-  const [waterLevelCm, setWaterLevelCm] = useState(SJB_NORMAL_STAGE_CM);
-  const [spillStageM, setSpillStageM] = useState(SJB_SPILL_STAGE_M);
-  const [focusCityId, setFocusCityId] = useState<string>("sao-joao-batista");
+  const [waterLevelCm, setWaterLevelCm] = useState(30);
+  const [spillStageM, setSpillStageM] = useState(6);
+  const [focusCityId, setFocusCityId] = useState<string>("");
+  const [heatmapEpoch, setHeatmapEpoch] = useState(0);
   const [probe, setProbe] = useState<{
     lon: number;
     lat: number;
     zM: number | null;
     pinned: boolean;
+    x: number;
+    y: number;
   } | null>(null);
   const [thalwegM, setThalwegM] = useState<number | null>(null);
   const probePinnedRef = useRef(false);
   const drawingRef = useRef(false);
+  const flyingToCityRef = useRef(false);
+  const reguaTouchedRef = useRef(false);
+  const focusCityIdRef = useRef("");
+  const applyCityStaffRef = useRef<(cityId: string, resetRegua: boolean) => void>(
+    () => {},
+  );
   const drawPointsRef = useRef<[number, number][]>([]);
   const patchesRef = useRef<TopoPatchFeature[]>([]);
   const patchesHydratedRef = useRef(false);
@@ -166,7 +187,7 @@ export default function App() {
   const forecastDaysRef = useRef(forecastDays);
   const timeWindowRef = useRef(timeWindow);
   const hydroRef = useRef(hydro);
-  const paintGenRef = useRef(0);
+  const liveRiverRef = useRef(liveRiver);
 
   const topoOverlayRef = useRef<CopernicusTopoOverlay | null>(null);
 
@@ -186,6 +207,7 @@ export default function App() {
         image: overlay.image,
         coordinates,
       });
+      (map.getSource("copernicus-topo") as ImageSource).setCoordinates(coordinates);
       if (!map.getLayer("topo-overlay")) {
         map.addLayer(
           {
@@ -214,34 +236,34 @@ export default function App() {
       image: HTMLCanvasElement,
       coordinates: CopernicusTopoOverlay["coordinates"],
     ) => {
-      const existing = map.getSource("inundation-spill") as
-        | ImageSource
-        | undefined;
-      if (!existing) {
-        map.addSource("inundation-spill", { type: "image", coordinates });
+      if (map.getLayer("inundation-layer")) {
+        map.removeLayer("inundation-layer");
       }
+      if (map.getSource("inundation-spill")) {
+        map.removeSource("inundation-spill");
+      }
+      map.addSource("inundation-spill", {
+        type: "image",
+        coordinates,
+      });
       (map.getSource("inundation-spill") as ImageSource).updateImage({
         image,
         coordinates,
       });
-      if (!map.getLayer("inundation-layer")) {
-        map.addLayer(
-          {
-            id: "inundation-layer",
-            type: "raster",
-            source: "inundation-spill",
-            layout: { visibility: "visible" },
-            paint: {
-              "raster-opacity": 0.85,
-              "raster-resampling": "linear",
-              "raster-fade-duration": 0,
-            },
+      map.addLayer(
+        {
+          id: "inundation-layer",
+          type: "raster",
+          source: "inundation-spill",
+          layout: { visibility: "visible" },
+          paint: {
+            "raster-opacity": 0.85,
+            "raster-resampling": "linear",
+            "raster-fade-duration": 0,
           },
-          "labels-overlay",
-        );
-      } else {
-        map.setLayoutProperty("inundation-layer", "visibility", "visible");
-      }
+        },
+        "labels-overlay",
+      );
       map.triggerRepaint();
     },
     [],
@@ -256,7 +278,6 @@ export default function App() {
         heatmapModeRef.current === "forecast"
           ? forecastStaffM(hydroRef.current, forecastDaysRef.current)
           : waterLevelCmRef.current / 100;
-      const gen = (paintGenRef.current += 1);
       try {
         const image = await renderSpillHeatmap(
           dem.elevations,
@@ -268,8 +289,9 @@ export default function App() {
           false,
           dem.viewBbox,
         );
-        if (!mapRef.current || gen !== paintGenRef.current) return;
-        applyInundationOverlay(map, image, dem.coordinates);
+        if (!mapRef.current) return;
+        if (topoOverlayRef.current !== dem) return;
+        applyInundationOverlay(map, image, bboxToCoordinates(dem.bbox));
       } catch (error) {
         console.error(error);
       }
@@ -278,14 +300,89 @@ export default function App() {
   );
 
   const paintSpillRef = useRef(paintSpill);
+  const setHeatmapEpochRef = useRef(setHeatmapEpoch);
   const refreshViewportRef = useRef<() => void>(() => {});
   const scheduleViewportRef = useRef<() => void>(() => {});
   useEffect(() => {
     paintSpillRef.current = paintSpill;
   }, [paintSpill]);
+  useEffect(() => {
+    setHeatmapEpochRef.current = setHeatmapEpoch;
+  }, []);
 
   useEffect(() => {
-    if (mapRef.current || !mapContainerRef.current) return;
+    focusCityIdRef.current = focusCityId;
+  }, [focusCityId]);
+
+  useEffect(() => {
+    applyCityStaffRef.current = (cityId, resetRegua) => {
+      const pack = region;
+      if (!pack) return;
+      const staff = staffForCity(pack, cityId);
+      focusCityIdRef.current = staff.city_id;
+      setFocusCityId(staff.city_id);
+      setSpillStageM(staff.spill_stage_m);
+      if (resetRegua) {
+        reguaTouchedRef.current = false;
+        const live = liveRiverRef.current ? liveStageCm(hydroRef.current) : null;
+        setWaterLevelCm(live ?? staff.normal_stage_cm);
+      }
+    };
+  }, [region]);
+
+  useEffect(() => {
+    const abort = new AbortController();
+    bootstrapRegion(abort.signal)
+      .then(({ catalog: nextCatalog, pack }) => {
+        if (abort.signal.aborted) return;
+        setCatalog(nextCatalog);
+        setRegion(pack);
+        const staff = staffForCity(pack, pack.target_city_id);
+        setFocusCityId(staff.city_id);
+        setWaterLevelCm(staff.normal_stage_cm);
+        setSpillStageM(staff.spill_stage_m);
+        reguaTouchedRef.current = false;
+        setTimeWindow(Math.max(1, Math.min(12, Math.round(surgeLagH(pack)))));
+        setRegionError(null);
+      })
+      .catch((error: unknown) => {
+        if (abort.signal.aborted) return;
+        console.error(error);
+        setRegionError("Falha ao carregar o pacote de região.");
+      });
+    return () => abort.abort();
+  }, []);
+
+  const applyRegionPack = (pack: RegionPack) => {
+    setActiveRegion(pack);
+    storeRegionId(pack.id);
+    setRegion(pack);
+    const staff = staffForCity(pack, pack.target_city_id);
+    setFocusCityId(staff.city_id);
+    setWaterLevelCm(staff.normal_stage_cm);
+    setSpillStageM(staff.spill_stage_m);
+    reguaTouchedRef.current = false;
+    setTimeWindow(Math.max(1, Math.min(12, Math.round(surgeLagH(pack)))));
+    setForecastDays(1);
+    setHeatmapMode("now");
+    setHydro(null);
+    patchesHydratedRef.current = false;
+    setPatches([]);
+    setDeletedPatchIds([]);
+  };
+
+  const switchRegion = (id: string) => {
+    if (!id || id === region?.id) return;
+    void loadRegionPack(id)
+      .then(applyRegionPack)
+      .catch((error: unknown) => {
+        console.error(error);
+        setRegionError("Falha ao trocar de bacia.");
+      });
+  };
+
+  useEffect(() => {
+    if (!region || mapRef.current || !mapContainerRef.current) return;
 
     const map = new MaplibreMap({
       container: mapContainerRef.current,
@@ -325,8 +422,8 @@ export default function App() {
           },
         ],
       },
-      center: SJB_COORDS,
-      zoom: 13.2,
+      center: [region.region.center.lon, region.region.center.lat],
+      zoom: region.region.default_zoom,
       maxPitch: 60,
     });
 
@@ -341,17 +438,19 @@ export default function App() {
     let fetchGen = 0;
     let inFlightDemKey = "";
 
-    const pinOverlayToViewport = () => {
-      const coords = viewportCoordinates(map);
-      const topo = map.getSource("copernicus-topo") as ImageSource | undefined;
-      topo?.setCoordinates(coords);
-      const spill = map.getSource("inundation-spill") as
-        | ImageSource
-        | undefined;
-      spill?.setCoordinates(coords);
-    };
-
     const refreshViewport = () => {
+      if (!flyingToCityRef.current) {
+        try {
+          const pack = getRegion();
+          const center = map.getCenter();
+          const near = nearestCity(pack, center.lng, center.lat);
+          if (near.id !== focusCityIdRef.current) {
+            applyCityStaffRef.current(near.id, !reguaTouchedRef.current);
+          }
+        } catch {
+          /* pack still loading */
+        }
+      }
       const bbox = bboxFromViewport(map);
       const demKey = `${bbox.west.toFixed(5)},${bbox.south.toFixed(5)},${bbox.east.toFixed(5)},${bbox.north.toFixed(5)}|${patchesContentKey(patchesRef.current)}`;
       if (demKey === inFlightDemKey) return;
@@ -380,13 +479,13 @@ export default function App() {
               ? { ...prev, zM: sampleElevationM(overlay, prev.lon, prev.lat) }
               : prev,
           );
-          await paintSpillRef.current(overlay);
           if (gen !== fetchGen) return;
           setPatches((prev) => mergePatchChecks(prev, overlay.patchChecks));
           setTopoStatus("ready");
           setTopoMeta(
             `COP-DEM GLO-30 · ${overlay.tileCount} tile${overlay.tileCount === 1 ? "" : "s"} · ${Math.round(overlay.elevationMinM)}–${Math.round(overlay.elevationMaxM)} m`,
           );
+          setHeatmapEpochRef.current((n) => n + 1);
         })
         .catch((error: unknown) => {
           if (signal.aborted || gen !== fetchGen) return;
@@ -561,15 +660,19 @@ export default function App() {
       refreshViewport();
     });
 
-    map.on("move", pinOverlayToViewport);
     map.on("moveend", scheduleViewportSync);
     map.on("zoomend", scheduleViewportSync);
 
     let probeRaf = 0;
-    const applyProbe = (lon: number, lat: number, pinned: boolean) => {
+    const applyProbe = (
+      lon: number,
+      lat: number,
+      pinned: boolean,
+      point: { x: number; y: number },
+    ) => {
       const dem = topoOverlayRef.current;
       const zM = dem ? sampleElevationM(dem, lon, lat) : null;
-      setProbe({ lon, lat, zM, pinned });
+      setProbe({ lon, lat, zM, pinned, x: point.x, y: point.y });
       const src = map.getSource("probe-point") as GeoJSONSource | undefined;
       src?.setData(
         pinned
@@ -593,11 +696,11 @@ export default function App() {
       if (probeRaf) return;
       probeRaf = window.requestAnimationFrame(() => {
         probeRaf = 0;
-        applyProbe(lng, lat, false);
+        applyProbe(lng, lat, false, event.point);
       });
     });
 
-    map.on("mouseleave", () => {
+    map.on("mouseout", () => {
       if (probePinnedRef.current) return;
       setProbe(null);
     });
@@ -622,7 +725,7 @@ export default function App() {
         return;
       }
       probePinnedRef.current = true;
-      applyProbe(event.lngLat.lng, event.lngLat.lat, true);
+      applyProbe(event.lngLat.lng, event.lngLat.lat, true, event.point);
     });
 
     return () => {
@@ -632,11 +735,12 @@ export default function App() {
       map.remove();
       mapRef.current = null;
     };
-  }, [applyTopoOverlay]);
+  }, [applyTopoOverlay, region]);
 
   useEffect(() => {
-    waterLevelCmRef.current = waterLevelCm;
-  }, [waterLevelCm]);
+    const min = liveRiver ? liveStageCm(hydro) ?? 0 : 0;
+    waterLevelCmRef.current = Math.max(min, waterLevelCm);
+  }, [waterLevelCm, liveRiver, hydro]);
 
   useEffect(() => {
     heatmapModeRef.current = heatmapMode;
@@ -655,41 +759,55 @@ export default function App() {
   }, [hydro]);
 
   useEffect(() => {
+    liveRiverRef.current = liveRiver;
+  }, [liveRiver]);
+
+  useEffect(() => {
+    if (!liveRiver) return;
+    const min = liveStageCm(hydro);
+    if (min == null) return;
+    setWaterLevelCm((w) => (w < min ? min : w));
+  }, [liveRiver, hydro]);
+
+  useEffect(() => {
+    if (!region) return;
     const abort = new AbortController();
+    const id = region.id;
+    patchesHydratedRef.current = false;
     Promise.all([
-      loadBundledPatches(abort.signal),
-      Promise.resolve(loadLocalPatches()),
+      loadBundledPatches(abort.signal, id),
+      Promise.resolve(loadLocalPatches(id)),
     ])
       .then(([bundled, local]) => {
         if (abort.signal.aborted) return;
-        const deleted = loadDeletedPatchIds();
+        const deleted = loadDeletedPatchIds(id);
         patchesHydratedRef.current = true;
         setDeletedPatchIds(deleted);
         setPatches(mergePatches(bundled, local, deleted));
       })
       .catch(() => {
         if (!abort.signal.aborted) {
-          const deleted = loadDeletedPatchIds();
+          const deleted = loadDeletedPatchIds(id);
           patchesHydratedRef.current = true;
           setDeletedPatchIds(deleted);
-          setPatches(mergePatches([], loadLocalPatches(), deleted));
+          setPatches(mergePatches([], loadLocalPatches(id), deleted));
         }
       });
     return () => abort.abort();
-  }, []);
+  }, [region?.id]);
 
   useEffect(() => {
-    if (!patchesHydratedRef.current) return;
-    saveDeletedPatchIds(deletedPatchIds);
-  }, [deletedPatchIds]);
+    if (!region || !patchesHydratedRef.current) return;
+    saveDeletedPatchIds(deletedPatchIds, region.id);
+  }, [deletedPatchIds, region]);
 
   useEffect(() => {
     patchesRef.current = patches;
     const map = mapRef.current;
     const src = map?.getSource("topo-patches") as GeoJSONSource | undefined;
     src?.setData(patchesToCollection(patches));
-    if (!patchesHydratedRef.current) return;
-    saveLocalPatches(patches);
+    if (!patchesHydratedRef.current || !region) return;
+    saveLocalPatches(patches, region.id);
     const key = patchesContentKey(patches);
     const prev = patchesDemKeyRef.current;
     if (prev === key) return;
@@ -754,9 +872,18 @@ export default function App() {
       void paintSpill();
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [paintSpill, waterLevelCm, heatmapMode, forecastDays, hydro, timeWindow]);
+  }, [
+    paintSpill,
+    waterLevelCm,
+    heatmapMode,
+    forecastDays,
+    hydro,
+    timeWindow,
+    heatmapEpoch,
+  ]);
 
   useEffect(() => {
+    if (!region) return;
     const abort = new AbortController();
     loadHydroSnapshot(abort.signal)
       .then((snapshot) => {
@@ -769,7 +896,7 @@ export default function App() {
         setHydroError("Falha ao cruzar Open-Meteo e ANA HidroWeb.");
       });
     return () => abort.abort();
-  }, []);
+  }, [region?.id]);
 
   useEffect(() => {
     topoOpacityRef.current = topoOpacity;
@@ -778,12 +905,44 @@ export default function App() {
     map.setPaintProperty("topo-overlay", "raster-opacity", topoOpacity / 100);
   }, [topoOpacity]);
 
+  if (!region) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          height: "100%",
+          background: "#111",
+          color: "#aaa",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "sans-serif",
+          fontSize: 14,
+        }}
+      >
+        {regionError ?? "Carregando bacia…"}
+      </div>
+    );
+  }
+
+  const cities = region.cities;
+  const hydroCfg = region.hydro;
+  const cityStaff = staffForCity(region, focusCityId || region.target_city_id);
+  const liveMinCm = liveRiver ? liveStageCm(hydro) : null;
+  const reguaMinCm = liveMinCm ?? 0;
+  const REGUA_MAX_M = hydroCfg.regua_max_m;
+  const REGUA_MAX_CM = REGUA_MAX_M * 100;
+  const waterLevelEffectiveCm = Math.max(
+    reguaMinCm,
+    Math.min(REGUA_MAX_CM, waterLevelCm),
+  );
   const displayFlow = hydro?.gauge_flow_m3s ?? 0;
   const forecastRainMm = rainForForecastDays(hydro, forecastDays);
   const forecastRainGrossMm = grossRainForForecastDays(hydro, forecastDays);
   const forecastRise = forecastStaffM(hydro, forecastDays);
-  const displayRise = forecastRainMm * 0.05;
-  const sjbOccupancy = floodOccupancy(timeWindow, 0);
+  const displayRise = forecastRainMm * hydroCfg.rain_runoff_coeff;
+  const targetOccupancy = floodOccupancy(timeWindow, 0);
+  const surge = cities.find((c) => c.id === region.surge_city_id);
   const legendMmhExample = rainMmPerHourForInlandCm(
     DEPTH_SCALE[0].cm,
     displayFlow || 40,
@@ -793,10 +952,26 @@ export default function App() {
   const forecastDayLabel = forecastHorizonLabel(forecastDays);
   const todayLabel = todayHorizonLabel();
   const staffNowM =
-    heatmapMode === "forecast" ? forecastRise : waterLevelCm / 100;
+    heatmapMode === "forecast" ? forecastRise : waterLevelEffectiveCm / 100;
   const waterSurfaceM =
     thalwegM != null && Number.isFinite(thalwegM)
       ? thalwegM + staffNowM * floodOccupancy(timeWindow, 0)
+      : null;
+  const floodDepthM =
+    probe?.zM != null && waterSurfaceM != null
+      ? waterSurfaceM - probe.zM
+      : null;
+  const floodStop =
+    floodDepthM != null && Number.isFinite(floodDepthM)
+      ? depthScaleStop(floodDepthM)
+      : null;
+  const floodMmh =
+    floodStop != null && floodDepthM != null
+      ? rainMmPerHourForInlandCm(
+          floodDepthM * 100,
+          displayFlow || 40,
+          spillStageM,
+        )
       : null;
 
   return (
@@ -831,11 +1006,59 @@ export default function App() {
           <h2
             style={{ color: "#00b4d8", margin: "0 0 5px 0", fontSize: "20px" }}
           >
-            Vale Alerta para Enchentes
+            {region.title}
           </h2>
           <p style={{ color: "#aaa", fontSize: "12px", margin: 0 }}>
-            Simulador Regional de Escoamento e Inundação
+            {region.subtitle}
           </p>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              color: "#888",
+              fontWeight: "bold",
+            }}
+          >
+            Bacia
+          </label>
+          <select
+            value={region.id}
+            onChange={(e) => switchRegion(e.target.value)}
+            style={{
+              width: "100%",
+              background: "#2d2d2d",
+              color: "#fff",
+              border: "1px solid #444",
+              borderRadius: 6,
+              padding: "8px 10px",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            {(catalog?.regions ?? [{ id: region.id, name: region.region.valley }]).map(
+              (entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                  {entry.target ? ` · ${entry.target}` : ""}
+                </option>
+              ),
+            )}
+          </select>
+          {region.calibration.status === "provisional" && (
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                color: "#ffd166",
+                lineHeight: 1.4,
+              }}
+            >
+              Pacote provisório — {region.calibration.note}
+            </p>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -850,16 +1073,20 @@ export default function App() {
             }}
           >
             Município do vale
-            <InfoTip text="Cidades do caminho de escoamento do Rio Tijucas (SC-410): Rancho Queimado (nascentes), Angelina, Major Gercino, Nova Trento (Ribeirão Alferes), São João Batista, Canelinha e Tijucas (foz). Ao escolher, o mapa voa até o município e, após 1 s, recarrega relevo e heatmap com os sliders atuais." />
+            <InfoTip text={region.copy.cities_tip} />
           </label>
           <select
             value={focusCityId}
             onChange={(e) => {
               const id = e.target.value;
-              const city = VALLEY_MAP_CITIES.find((c) => c.id === id);
-              setFocusCityId(id);
+              const city = cities.find((c) => c.id === id);
+              flyingToCityRef.current = true;
+              applyCityStaffRef.current(id, true);
               const map = mapRef.current;
-              if (!city || !map) return;
+              if (!city || !map) {
+                flyingToCityRef.current = false;
+                return;
+              }
               map.stop();
               map.flyTo({
                 center: [city.lon, city.lat],
@@ -868,6 +1095,7 @@ export default function App() {
                 essential: true,
               });
               map.once("moveend", () => {
+                flyingToCityRef.current = false;
                 scheduleViewportRef.current();
               });
             }}
@@ -882,7 +1110,7 @@ export default function App() {
               cursor: "pointer",
             }}
           >
-            {VALLEY_MAP_CITIES.map((city) => (
+            {cities.map((city) => (
               <option key={city.id} value={city.id}>
                 {city.name}
               </option>
@@ -891,18 +1119,28 @@ export default function App() {
           <p
             style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}
           >
-            {VALLEY_MAP_CITIES.find((c) => c.id === focusCityId)?.blurb}
+            {cities.find((c) => c.id === focusCityId)?.blurb}
           </p>
+          {region.copy.region_blurb ? (
+            <p
+              style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}
+            >
+              {region.copy.region_blurb}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={() => {
-              const live = hydro?.gauge_stage_cm;
+              const staff = staffForCity(region, focusCityId);
+              setSpillStageM(staff.spill_stage_m);
+              const live = liveRiver ? liveStageCm(hydro) : null;
               setWaterLevelCm(
-                live != null && Number.isFinite(live)
+                live != null
                   ? Math.round(Math.min(REGUA_MAX_CM, Math.max(0, live)))
-                  : SJB_NORMAL_STAGE_CM,
+                  : staff.normal_stage_cm,
               );
-              setTimeWindow(4);
+              reguaTouchedRef.current = false;
+              setTimeWindow(Math.max(1, Math.min(12, Math.round(surgeLagH(region)))));
               setForecastDays(1);
               setHeatmapMode("now");
             }}
@@ -920,60 +1158,49 @@ export default function App() {
             }}
           >
             Resetar para condições normais
-            <InfoTip text="Volta a régua ao nível natural (cota ANA ao vivo, ou ~30 cm), zera a chuva simulada e põe a janela em +4 h — o tempo típico da onda de Major Gercino até SJB." />
+            <InfoTip
+              text={
+                liveRiver
+                  ? "Com Tempo Real ligado, a régua volta à cota ANA ao vivo (o piso atual do rio). Previsão no dia 1 e heatmap Agora."
+                  : "Com Tempo Real desligado, a régua volta ao nível natural no leito deste município (sem usar a cota ANA). Previsão no dia 1 e heatmap Agora."
+              }
+            />
           </button>
         </div>
 
-        <div
+        <label
           style={{
             display: "flex",
             alignItems: "center",
-            background: "#2d2d2d",
-            borderRadius: "6px",
-            padding: "2px",
-            gap: 4,
+            gap: 8,
+            background: liveRiver ? "rgba(230, 57, 70, 0.12)" : "#2d2d2d",
+            border: liveRiver ? "1px solid #e63946" : "1px solid #333",
+            borderRadius: 6,
+            padding: "8px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 700,
           }}
         >
-          <button
-            onClick={() => setActiveTab("simulador")}
-            style={{
-              flex: 1,
-              padding: "8px",
-              border: 0,
-              borderRadius: "4px",
-              background: activeTab === "simulador" ? "#0077b6" : "transparent",
-              color: "#fff",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: "bold",
+          <input
+            type="checkbox"
+            checked={liveRiver}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setLiveRiver(on);
+              setHeatmapMode("now");
+              if (on) {
+                const min = liveStageCm(hydro);
+                if (min != null) {
+                  setWaterLevelCm((w) => Math.max(w, min));
+                }
+              }
             }}
-          >
-            🔮 Simulador
-          </button>
-          <button
-            onClick={() => setActiveTab("live")}
-            style={{
-              flex: 1,
-              padding: "8px",
-              border: 0,
-              borderRadius: "4px",
-              background: activeTab === "live" ? "#e63946" : "transparent",
-              color: "#fff",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: "bold",
-            }}
-          >
-            🛰️ Tempo Real
-          </button>
-          <InfoTip
-            text={
-              activeTab === "simulador"
-                ? "Simulador: a régua e a previsão de 7 dias cruzam o DEM. A janela de escape recua a água ao leito nos dois heatmaps. O acúmulo efetivo não soma dias secos."
-                : "Tempo Real: chuva Open-Meteo (balde com recuo) e vazão/cota ANA. A janela de escape vale para o heatmap ativo."
-            }
+            style={{ width: 16, height: 16, accentColor: "#e63946", cursor: "pointer" }}
           />
-        </div>
+          <span>🛰️ Tempo Real</span>
+          <InfoTip text="Ligado: mostra a cota ANA atual e ela vira o mínimo da régua — dá para simular acima, não abaixo. Desligado: a régua vai de 0 até o teto, livre. Resetar segue o mesmo modo." />
+        </label>
 
         <hr style={{ border: 0, borderTop: "1px solid #333", margin: 0 }} />
 
@@ -1031,7 +1258,7 @@ export default function App() {
           >
             Escala de profundidade (cm)
             <InfoTip
-              text={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×0,05 + Q/250).`}
+              text={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×${hydroCfg.rain_runoff_coeff} + Q/${hydroCfg.valley_width_factor}).`}
             />
           </div>
           <div className="depth-scale">
@@ -1101,14 +1328,17 @@ export default function App() {
           >
             🌊 Nível do rio (régua)
             <InfoTip
-              text={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. A cota “sai da calha” é ajustável de ${SPILL_STAGE_MIN_M} a ${SPILL_STAGE_MAX_M} m (passos de 50 cm). Defesa Civil SJB: ruas a partir de 6 m. Picos: 6,85 m (maio/2024) e ~9 m (dez/2022).`}
+              text={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. Transbordo de ${cityStaff.city_name}: ${cityStaff.spill_stage_min_m} a ${cityStaff.spill_stage_max_m} m. ${cityStaff.spill_note}`}
             />
             <LayerLamp on={heatmapMode === "now"} liveLabel="agora" />
             <span
               style={{ color: "#00b4d8", width: "100%", textAlign: "right" }}
             >
-              {(waterLevelCm / 100).toFixed(2)} m
-              {waterLevelCm / 100 >= spillStageM
+              {(waterLevelEffectiveCm / 100).toFixed(2)} m
+              {liveRiver && liveMinCm != null
+                ? ` · piso ANA ${(liveMinCm / 100).toFixed(2)} m`
+                : ""}
+              {waterLevelEffectiveCm / 100 >= spillStageM
                 ? " · saiu da calha"
                 : " · na calha"}
             </span>
@@ -1123,14 +1353,15 @@ export default function App() {
                 marginBottom: 6,
               }}
             >
-              Sai da calha em {spillStageM.toFixed(1).replace(".", ",")} m
+              Sai da calha em {spillStageM.toFixed(1).replace(".", ",")} m ·{" "}
+              {cityStaff.city_name}
             </div>
             <div
               className="spill-stops"
               role="radiogroup"
               aria-label="Cota em que o rio sai da calha"
             >
-              {SPILL_STAGE_STOPS_M.map((m) => (
+              {cityStaff.spill_stage_stops_m.map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -1152,14 +1383,18 @@ export default function App() {
             />
             <input
               type="range"
-              min="0"
+              min={reguaMinCm}
               max={REGUA_MAX_CM}
               step="5"
-              value={waterLevelCm}
-              onPointerDown={() => setHeatmapMode("now")}
+              value={Math.max(reguaMinCm, waterLevelCm)}
+              onPointerDown={() => {
+                if (!liveRiver) reguaTouchedRef.current = true;
+                setHeatmapMode("now");
+              }}
               onChange={(e) => {
                 setHeatmapMode("now");
-                setWaterLevelCm(Number(e.target.value));
+                const next = Number(e.target.value);
+                setWaterLevelCm(Math.max(reguaMinCm, next));
               }}
               style={{ width: "100%", cursor: "pointer" }}
             />
@@ -1196,7 +1431,7 @@ export default function App() {
             }}
           >
             🌧️ Acúmulo previsto (Open-Meteo)
-            <InfoTip text="A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar este slider coloca no mapa só o heatmap Previsão. A chuva efetiva usa um balde com meia-vida de 12 h." />
+            <InfoTip text={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar este slider coloca no mapa só o heatmap Previsão. A chuva efetiva usa um balde com meia-vida de ${hydroCfg.rain_storage_halflife_h} h.`} />
             <LayerLamp on={heatmapMode === "forecast"} liveLabel="previsão" />
             <span
               style={{
@@ -1259,10 +1494,10 @@ export default function App() {
           >
             ⏱️ Janela de escape
             <InfoTip
-              text={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: Major Gercino em ~4 h) e depois a água volta ao leito em cerca de ${OVERBANK_DRAIN_H} h. Em SJB, +${timeWindow} h deixa cerca de ${Math.round(sjbOccupancy * 100)}% da lâmina de pico ainda na planície.`}
+              text={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: ${surge?.name ?? "montante"} em ~${surgeLagH(region)} h) e depois a água volta ao leito em cerca de ${hydroCfg.overbank_drain_h} h. Em ${region.copy.target_short}, +${timeWindow} h deixa cerca de ${Math.round(targetOccupancy * 100)}% da lâmina de pico ainda na planície.`}
             />
             <span style={{ marginLeft: "auto", color: "#00b4d8" }}>
-              +{timeWindow}h · {Math.round(sjbOccupancy * 100)}%
+              +{timeWindow}h · {Math.round(targetOccupancy * 100)}%
             </span>
           </label>
           <input
@@ -1281,53 +1516,53 @@ export default function App() {
           </p>
         </div>
 
-        {activeTab === "simulador" ? (
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+        >
+          <p
+            style={{
+              background: "#2a2a2a",
+              padding: "12px",
+              borderRadius: "6px",
+              fontSize: "12px",
+              color: "#ccc",
+              lineHeight: "1.4",
+              borderLeft: "4px solid #00b4d8",
+              margin: 0,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 6,
+            }}
           >
+            <span>
+              ΔH chuva efetiva (Open-Meteo {forecastDays}d) ≈{" "}
+              <b>{displayRise.toFixed(2)} m</b>
+            </span>
+            <InfoTip text={`Subida pela chuva efetiva (não a soma bruta): mm do balde × ${hydroCfg.rain_runoff_coeff}. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps.`} />
+          </p>
+          {hydro && (
             <p
               style={{
-                background: "#2a2a2a",
-                padding: "12px",
-                borderRadius: "6px",
-                fontSize: "12px",
-                color: "#ccc",
-                lineHeight: "1.4",
-                borderLeft: "4px solid #00b4d8",
                 margin: 0,
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 6,
+                fontSize: "11px",
+                color: "#888",
+                lineHeight: 1.5,
               }}
             >
-              <span>
-                ΔH chuva efetiva (Open-Meteo {forecastDays}d) ≈{" "}
-                <b>{displayRise.toFixed(2)} m</b>
-              </span>
-              <InfoTip text="Subida pela chuva efetiva (não a soma bruta): mm do balde × 0,05. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps." />
+              {hydro.rainfall
+                .map((r) => {
+                  const eff = effectiveRainMm(
+                    r.hourly_mm,
+                    forecastHorizonHours(forecastDays),
+                  );
+                  return `${r.name} ${eff.toFixed(0)} mm efetivos (${r.accum_7d_mm} mm/7d bruto)`;
+                })
+                .join(" · ")}
             </p>
-            {hydro && (
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "11px",
-                  color: "#888",
-                  lineHeight: 1.5,
-                }}
-              >
-                {hydro.rainfall
-                  .map((r) => {
-                    const eff = effectiveRainMm(
-                      r.hourly_mm,
-                      forecastHorizonHours(forecastDays),
-                    );
-                    return `${r.name} ${eff.toFixed(0)} mm efetivos (${r.accum_7d_mm} mm/7d bruto)`;
-                  })
-                  .join(" · ")}
-              </p>
-            )}
-          </div>
-        ) : (
+          )}
+        </div>
+
+        {liveRiver && (
           <div style={{ fontSize: "12px", color: "#bbb", lineHeight: "1.45" }}>
             {hydroError && <p style={{ color: "#e63946" }}>{hydroError}</p>}
             {!hydro && !hydroError && (
@@ -1336,23 +1571,21 @@ export default function App() {
             {hydro && (
               <>
                 <p style={{ margin: "0 0 8px" }}>
-                  Chuva efetiva {forecastDays}d {forecastRainMm.toFixed(1)} mm
-                  (bruto {forecastRainGrossMm.toFixed(0)} mm) · subida +
-                  {displayRise.toFixed(2)} m · cota {forecastRise.toFixed(2)} m
-                  · lag {hydro.lag_major_gercino_to_sjb_h} h
-                </p>
-                <p style={{ margin: "0 0 8px" }}>
-                  Telemetria ANA: Q {hydro.gauge_flow_m3s.toFixed(1)} m³/s
-                  {hydro.gauge_stage_cm != null
-                    ? ` · cota ${hydro.gauge_stage_cm.toFixed(0)} cm`
-                    : ""}
+                  Agora no rio:{" "}
+                  {liveMinCm != null
+                    ? `${(liveMinCm / 100).toFixed(2)} m (piso da régua)`
+                    : "sem cota ANA — régua livre até haver telemetria"}
+                  {" · "}
+                  chuva efetiva {forecastDays}d {forecastRainMm.toFixed(1)} mm
+                  (bruto {forecastRainGrossMm.toFixed(0)} mm) · Q{" "}
+                  {hydro.gauge_flow_m3s.toFixed(1)} m³/s
                 </p>
                 {hydro.gauges.map((g) => (
                   <p key={g.id} style={{ margin: "0 0 4px", color: "#999" }}>
                     {g.online ? "●" : "○"} {g.name} ({g.code}){" "}
                     {g.online
-                      ? `${g.flow_m3s?.toFixed(1) ?? "—"} m³/s`
-                      : "sem telemetria — usando baseline SJB"}
+                      ? `${g.flow_m3s?.toFixed(1) ?? "—"} m³/s${g.stage_cm != null ? ` · ${g.stage_cm.toFixed(0)} cm` : ""}`
+                      : region.copy.live_fallback}
                   </p>
                 ))}
               </>
@@ -1771,6 +2004,45 @@ export default function App() {
             cursor: "crosshair",
           }}
         />
+        {probe &&
+          !drawingPatch &&
+          floodStop != null &&
+          floodDepthM != null &&
+          floodMmh != null && (
+            <div
+              className="map-flood-tip"
+              style={{
+                left: Math.max(
+                  8,
+                  Math.min(
+                    probe.x + 14,
+                    (mapContainerRef.current?.clientWidth ?? 320) - 168,
+                  ),
+                ),
+                top: Math.max(
+                  8,
+                  Math.min(
+                    probe.y + 14,
+                    (mapContainerRef.current?.clientHeight ?? 200) - 88,
+                  ),
+                ),
+              }}
+            >
+              <div
+                className="map-flood-tip-swatch"
+                style={{
+                  background: floodStop.color,
+                  color: depthLabelColor(floodStop.rgba),
+                }}
+              >
+                {Math.round(floodDepthM * 100)} cm
+              </div>
+              <div className="map-flood-tip-mmh">
+                {floodMmh.toFixed(0)} mm/h
+                <span>faixa {floodStop.cm} cm</span>
+              </div>
+            </div>
+          )}
         {probe && (
           <div className="map-probe">
             <div className="map-probe-coords">

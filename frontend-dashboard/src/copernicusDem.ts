@@ -55,20 +55,12 @@ export function normalizeBbox(bbox: LonLatBBox): LonLatBBox {
   };
 }
 
-export function viewportCoordinates(map: {
-  getBounds(): {
-    getWest(): number;
-    getSouth(): number;
-    getEast(): number;
-    getNorth(): number;
-  };
-}): CopernicusTopoOverlay["coordinates"] {
-  const b = map.getBounds();
+export function bboxToCoordinates(bbox: LonLatBBox): CopernicusTopoOverlay["coordinates"] {
   return [
-    [b.getWest(), b.getNorth()],
-    [b.getEast(), b.getNorth()],
-    [b.getEast(), b.getSouth()],
-    [b.getWest(), b.getSouth()],
+    [bbox.west, bbox.north],
+    [bbox.east, bbox.north],
+    [bbox.east, bbox.south],
+    [bbox.west, bbox.south],
   ];
 }
 
@@ -415,12 +407,7 @@ export async function loadCopernicusTopoOverlay(
     height,
     bbox: work,
     viewBbox: view,
-    coordinates: [
-      [view.west, view.north],
-      [view.east, view.north],
-      [view.east, view.south],
-      [view.west, view.south],
-    ],
+    coordinates: bboxToCoordinates(view),
     productName: "COP-DEM GLO-30",
     tileCount,
     elevationMinM,
