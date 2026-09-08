@@ -34,6 +34,18 @@ def http_get(url: str, timeout: int = 25) -> str:
         return resp.read().decode("utf-8", "replace")
 
 
+def effective_rain_mm(precip: list[float], hours: int, half_life_h: float = 12) -> float:
+    """Peak stored rain; dry hours drain the bucket (not a 7-day arithmetic sum)."""
+    n = min(len(precip), max(0, hours))
+    decay = 0.5 ** (1 / half_life_h)
+    store = 0.0
+    peak = 0.0
+    for i in range(n):
+        store = store * decay + max(0.0, precip[i])
+        peak = max(peak, store)
+    return round(peak, 2)
+
+
 def fetch_open_meteo(cities: list[dict], hours: int = 12) -> list[dict]:
     lats = ",".join(str(c["lat"]) for c in cities)
     lons = ",".join(str(c["lon"]) for c in cities)
@@ -70,6 +82,7 @@ def fetch_open_meteo(cities: list[dict], hours: int = 12) -> list[dict]:
                 "accum_6h_mm": round(sum(precip[:6]), 2),
                 "accum_12h_mm": round(sum(precip[:12]), 2),
                 "accum_7d_mm": round(sum(precip[:168]), 2),
+                "accum_7d_effective_mm": effective_rain_mm(precip, 168),
                 "accum_curve_mm": acc,
             }
         )

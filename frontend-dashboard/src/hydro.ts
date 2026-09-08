@@ -45,6 +45,10 @@ export const UPSTREAM_CATCHMENT_IDS = ["rancho-queimado", "angelina", "major-ger
 export const RAIN_COEFF = 0.05;
 export const VALLEY_WIDTH_FACTOR = 250;
 export const LAG_GERCINO_H = 4;
+/** Hours after local peak for overbank water to return to the channel. */
+export const OVERBANK_DRAIN_H = 12;
+/** Half-life of stored rain in the catchment (dry hours drain the flood bucket). */
+export const RAIN_STORAGE_HALFLIFE_H = 12;
 
 export const VALLEY_CITIES = [
   { id: "rancho-queimado", name: "Rancho Queimado", lat: -27.6725, lon: -49.0217, lag_to_sjb_h: 8, role: "headwater" },
@@ -145,6 +149,9 @@ export const REACH_LAGS_H = [8, 6, 6, 4, 3, 2, 1.5, 1, 0.4, 0, -0.5, -1, -2, -3]
 
 /** Typical low-flow staff at SJB (natural / in-bank), ~ANA 84095500. */
 export const SJB_NORMAL_STAGE_CM = 30;
+/** Régua max for simulation (cover a whole terrace even if 20 m is physically extreme). */
+export const REGUA_MAX_M = 20;
+export const REGUA_MAX_CM = REGUA_MAX_M * 100;
 
 /**
  * Staff-gauge reading (m) at which the Rio Tijucas starts flooding streets in
@@ -153,12 +160,57 @@ export const SJB_NORMAL_STAGE_CM = 30;
  * Peaks: 6,85 m (maio/2024), ~9 m (dez/2022).
  */
 export const SJB_SPILL_STAGE_M = 6;
+export const SPILL_STAGE_MIN_M = 6;
+export const SPILL_STAGE_MAX_M = 8;
+export const SPILL_STAGE_STEP_M = 0.5;
+export const SPILL_STAGE_STOPS_M = [6, 6.5, 7, 7.5, 8] as const;
 
 /** Shortest upstream burst used to translate inland depth → rainfall intensity. */
 export const CRITICAL_RAIN_H = 3;
 
 export function stageRiseM(rainMm: number, flowM3s: number): number {
   return Math.max(0, rainMm * RAIN_COEFF + flowM3s / VALLEY_WIDTH_FACTOR);
+}
+
+/**
+ * Fraction of peak overbank water still on the floodplain.
+ * Rising limb until the local lag (wave coming down the valley), then linear
+ * drain back into the bed over OVERBANK_DRAIN_H hours.
+ */
+export function floodOccupancy(hour: number, lagH: number): number {
+  const t = hour - lagH;
+  if (t >= 0) {
+    return Math.max(0, 1 - t / OVERBANK_DRAIN_H);
+  }
+  const riseH = Math.max(2, lagH > 0 ? lagH : LAG_GERCINO_H);
+  return Math.max(0, Math.min(1, 1 + t / riseH));
+}
+
+export function riverArrival(hour: number, lagH: number): number {
+  return floodOccupancy(hour, lagH);
+}
+
+/**
+ * Peak stored rain (mm) over `hours`, decaying every hour (half-life
+ * RAIN_STORAGE_HALFLIFE_H). Two dry days empty most of the bucket, so flood
+ * potential is not the 7-day arithmetic sum.
+ */
+export function effectiveRainMm(hourly: number[], hours: number): number {
+  const n = Math.min(hourly.length, Math.max(0, Math.round(hours)));
+  if (n <= 0) return 0;
+  const decay = 0.5 ** (1 / RAIN_STORAGE_HALFLIFE_H);
+  let store = 0;
+  let peak = 0;
+  for (let i = 0; i < n; i += 1) {
+    store = store * decay + Math.max(0, hourly[i] || 0);
+    if (store > peak) peak = store;
+  }
+  return round2(peak);
+}
+
+export function grossRainMm(hourly: number[], hours: number): number {
+  const n = Math.min(hourly.length, Math.max(0, Math.round(hours)));
+  return round2(hourly.slice(0, n).reduce((a, b) => a + b, 0));
 }
 
 /** Accumulated rain (mm) for a staff reading, given current valley flow. */
@@ -169,10 +221,14 @@ export function rainMmForStaffM(staffM: number, flowM3s: number): number {
 
 /**
  * mm/h sustained for CRITICAL_RAIN_H so first overbank ground
- * (cota 6 m) is under `inlandCm` of water.
+ * (spill cota + inlandCm) is under `inlandCm` of water.
  */
-export function rainMmPerHourForInlandCm(inlandCm: number, flowM3s: number): number {
-  const staffM = SJB_SPILL_STAGE_M + inlandCm / 100;
+export function rainMmPerHourForInlandCm(
+  inlandCm: number,
+  flowM3s: number,
+  spillStageM: number = SJB_SPILL_STAGE_M,
+): number {
+  const staffM = spillStageM + inlandCm / 100;
   return rainMmForStaffM(staffM, flowM3s) / CRITICAL_RAIN_H;
 }
 
@@ -247,7 +303,18 @@ function round2(n: number): number {
 }
 
 function accumHours(city: CityRain, hours: number): number {
-  return round2(city.hourly_mm.slice(0, Math.max(1, hours)).reduce((a, b) => a + b, 0));
+  return effectiveRainMm(city.hourly_mm, hours);
+}
+
+function meanUpstreamMetric(
+  snapshot: HydroSnapshot,
+  metric: (city: CityRain) => number,
+): number {
+  const upstream = snapshot.rainfall.filter((r) =>
+    (UPSTREAM_CATCHMENT_IDS as readonly string[]).includes(r.id),
+  );
+  if (!upstream.length) return 0;
+  return round2(upstream.reduce((s, r) => s + metric(r), 0) / upstream.length);
 }
 
 export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnapshot> {
@@ -282,7 +349,7 @@ export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnap
     upstream.reduce((s, r) => s + r.accum_3h_mm, 0) / Math.max(upstream.length, 1);
 
   const rain7 =
-    upstream.reduce((s, r) => s + r.accum_7d_mm, 0) / Math.max(upstream.length, 1);
+    upstream.reduce((s, r) => s + effectiveRainMm(r.hourly_mm, 168), 0) / Math.max(upstream.length, 1);
 
   return {
     fetched_at: new Date().toISOString(),
@@ -296,14 +363,6 @@ export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnap
     rainfall,
     gauges,
   };
-}
-
-export function riverArrival(hour: number, lagH: number): number {
-  if (lagH < 0) return hour >= Math.abs(lagH) * 0.35 ? 1 : hour / 12;
-  if (hour <= 0) return lagH === 0 ? 0.35 : 0;
-  if (hour < lagH) return Math.max(0, (hour / lagH) * 0.25);
-  const passed = hour - lagH;
-  return Math.min(1, 0.75 + passed / 8);
 }
 
 function offsetPolygon(
@@ -335,10 +394,17 @@ export function rainForHorizon(snapshot: HydroSnapshot | null, hours: number, ov
   return round2(upstream.reduce((s, r) => s + accumHours(r, hours), 0) / upstream.length);
 }
 
-/** Mean Open-Meteo precipitation (mm) over the upstream catchment for the next `days`. */
+/** Peak effective rain (mm) in the upstream catchment over the next `days`. */
 export function rainForForecastDays(snapshot: HydroSnapshot | null, days: number): number {
-  const hours = Math.max(1, Math.round(days * 24));
+  const hours = forecastHorizonHours(days);
   return rainForHorizon(snapshot, hours);
+}
+
+/** Arithmetic sum of forecast rain (mm), ignoring drainage between storms. */
+export function grossRainForForecastDays(snapshot: HydroSnapshot | null, days: number): number {
+  if (!snapshot) return 0;
+  const hours = forecastHorizonHours(days);
+  return meanUpstreamMetric(snapshot, (r) => grossRainMm(r.hourly_mm, hours));
 }
 
 /** Predicted staff (m above bed) after `days` of forecast rain, from current ANA stage. */
@@ -346,6 +412,65 @@ export function forecastStaffM(snapshot: HydroSnapshot | null, days: number): nu
   const rainMm = rainForForecastDays(snapshot, days);
   const currentM = (snapshot?.gauge_stage_cm ?? SJB_NORMAL_STAGE_CM) / 100;
   return Math.max(0, currentM + rainMm * RAIN_COEFF);
+}
+
+export const HYDRO_TZ = "America/Sao_Paulo";
+
+function saoPauloYmd(from: Date): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: HYDRO_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(from);
+  const num = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { y: num("year"), m: num("month"), d: num("day") };
+}
+
+/** Calendar day in São Paulo: today + `offsetDays` (0 = hoje). */
+export function horizonDate(offsetDays: number, from = new Date()): Date {
+  const { y, m, d } = saoPauloYmd(from);
+  return new Date(Date.UTC(y, m - 1, d + offsetDays, 12, 0, 0));
+}
+
+function saoPauloHour(from: Date): number {
+  return Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: HYDRO_TZ,
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(from),
+  );
+}
+
+/**
+ * Hours of Open-Meteo series to include for a 1–7 slider that starts today.
+ * Day 1 = restante de hoje; day 7 = hoje até o 7º dia (ex.: terça 8 → segunda 14).
+ */
+export function forecastHorizonHours(days: number, from = new Date()): number {
+  const n = Math.max(1, Math.round(days));
+  const remainingToday = Math.max(1, 24 - saoPauloHour(from));
+  return remainingToday + (n - 1) * 24;
+}
+
+export function formatWeekdayDatePt(date: Date): string {
+  const weekday = date.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" });
+  const numbered = date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${numbered}`;
+}
+
+/** Last calendar day included in the 7-day box (slider 1 = hoje). */
+export function forecastHorizonLabel(days: number, from = new Date()): string {
+  return formatWeekdayDatePt(horizonDate(Math.max(0, days - 1), from));
+}
+
+export function todayHorizonLabel(from = new Date()): string {
+  return formatWeekdayDatePt(horizonDate(0, from));
 }
 
 export function buildFloodGeoJSON(

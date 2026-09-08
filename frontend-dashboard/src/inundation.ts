@@ -1,5 +1,5 @@
-import type { LonLatBBox } from "./copernicusDem";
-import { REACH_LAGS_H, RIO_TIJUCAS, riverArrival } from "./hydro";
+import { viewCropRect, type LonLatBBox } from "./copernicusDem";
+import { REACH_LAGS_H, RIO_TIJUCAS, floodOccupancy } from "./hydro";
 
 export const DEPTH_SCALE: { cm: number; color: string; rgba: [number, number, number, number] }[] = [
   { cm: 10, color: "#D6F6FF", rgba: [214, 246, 255, 120] },
@@ -56,19 +56,62 @@ function toPixel(
   };
 }
 
+function clipSegmentToBbox(
+  a: [number, number],
+  b: [number, number],
+  bbox: LonLatBBox,
+): [[number, number], [number, number]] | null {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number): boolean => {
+    if (Math.abs(p) < 1e-14) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  if (
+    !clip(-dx, a[0] - bbox.west) ||
+    !clip(dx, bbox.east - a[0]) ||
+    !clip(-dy, a[1] - bbox.south) ||
+    !clip(dy, bbox.north - a[1])
+  ) {
+    return null;
+  }
+  return [
+    [a[0] + t0 * dx, a[1] + t0 * dy],
+    [a[0] + t1 * dx, a[1] + t1 * dy],
+  ];
+}
+
+function stampRadiusPx(bbox: LonLatBBox, width: number): number {
+  const lat = ((bbox.north + bbox.south) / 2) * (Math.PI / 180);
+  const mPerPx =
+    ((bbox.east - bbox.west) / Math.max(width, 1)) * 111_320 * Math.max(0.2, Math.cos(lat));
+  return Math.max(2, Math.min(16, Math.ceil(60 / Math.max(mPerPx, 1))));
+}
+
 function rasterizeRiver(
   width: number,
   height: number,
   bbox: LonLatBBox,
 ): { x: number; y: number; i: number; lag: number }[] {
-  const pts = RIO_TIJUCAS.map(([lon, lat]) => toPixel(lon, lat, bbox, width, height));
+  const radius = stampRadiusPx(bbox, width);
   const seeds: { x: number; y: number; i: number; lag: number }[] = [];
   const seen = new Uint8Array(width * height);
   const stamp = (x: number, y: number, lag: number) => {
     const xi = Math.round(x);
     const yi = Math.round(y);
-    for (let dy = -2; dy <= 2; dy += 1) {
-      for (let dx = -2; dx <= 2; dx += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        if (dx * dx + dy * dy > radius * radius) continue;
         const xx = xi + dx;
         const yy = yi + dy;
         if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
@@ -80,9 +123,11 @@ function rasterizeRiver(
     }
   };
 
-  for (let s = 0; s < pts.length - 1; s += 1) {
-    const a = pts[s];
-    const b = pts[s + 1];
+  for (let s = 0; s < RIO_TIJUCAS.length - 1; s += 1) {
+    const clipped = clipSegmentToBbox(RIO_TIJUCAS[s], RIO_TIJUCAS[s + 1], bbox);
+    if (!clipped) continue;
+    const a = toPixel(clipped[0][0], clipped[0][1], bbox, width, height);
+    const b = toPixel(clipped[1][0], clipped[1][1], bbox, width, height);
     const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
     const lag0 = lagAt(s);
     const lag1 = lagAt(s + 1);
@@ -92,6 +137,22 @@ function rasterizeRiver(
     }
   }
   return seeds;
+}
+
+/** DSM noise / 30 m spikes: water may pass, but only cells below WSE are painted. */
+const CONNECT_SLACK_M = 0.55;
+
+function nearestRiverLag(lon: number, lat: number): number {
+  let best = REACH_LAGS_H[0] ?? 0;
+  let bestD = Infinity;
+  for (let i = 0; i < RIO_TIJUCAS.length; i += 1) {
+    const d = Math.hypot(RIO_TIJUCAS[i][0] - lon, RIO_TIJUCAS[i][1] - lat);
+    if (d < bestD) {
+      bestD = d;
+      best = lagAt(i);
+    }
+  }
+  return best;
 }
 
 function channelThalwegM(
@@ -106,6 +167,15 @@ function channelThalwegM(
   return percentile(riverZ, 0.1);
 }
 
+export function estimateChannelThalwegM(
+  elevations: Float32Array,
+  width: number,
+  height: number,
+  bbox: LonLatBBox,
+): number {
+  return channelThalwegM(elevations, rasterizeRiver(width, height, bbox));
+}
+
 export async function renderSpillHeatmap(
   elevations: Float32Array,
   width: number,
@@ -114,55 +184,55 @@ export async function renderSpillHeatmap(
   extraAboveSpillM: number,
   hour: number,
   uniform = false,
-): Promise<ImageBitmap> {
+  viewBbox?: LonLatBBox,
+): Promise<HTMLCanvasElement> {
   const n = width * height;
   const assigned = new Float32Array(n);
   assigned.fill(Number.NaN);
+  const reached = new Uint8Array(n);
   const queue: number[] = [];
+  let qHead = 0;
   const seeds = rasterizeRiver(width, height, bbox);
   const thalweg = channelThalwegM(elevations, seeds);
 
+  const canvas = document.createElement("canvas");
   if (!Number.isFinite(thalweg)) {
-    return createImageBitmap(new ImageData(width, height));
+    canvas.width = 1;
+    canvas.height = 1;
+    return canvas;
   }
 
-  for (const seed of seeds) {
-    const z = elevations[seed.i];
-    const extra = uniform
-      ? extraAboveSpillM
-      : extraAboveSpillM * riverArrival(hour, seed.lag);
-    if (isNoData(z)) continue;
-    const wse = thalweg + Math.max(0, extra);
-    if (z >= wse) continue;
-    assigned[seed.i] = wse;
-    queue.push(seed.i);
-  }
+  const view = viewBbox ?? bbox;
+  const occ = uniform
+    ? 1
+    : floodOccupancy(hour, nearestRiverLag((view.west + view.east) / 2, (view.south + view.north) / 2));
+  const wse = thalweg + Math.max(0, extraAboveSpillM) * occ;
 
-  const neighbors = [
-    -1,
-    1,
-    -width,
-    width,
-    -width - 1,
-    -width + 1,
-    width - 1,
-    width + 1,
-  ];
-  while (queue.length) {
-    const i = queue.pop() as number;
-    const wse = assigned[i];
+  const canPass = (z: number) => z < wse + CONNECT_SLACK_M;
+  const canPaint = (z: number) => z < wse;
+
+  const enqueue = (i: number) => {
+    if (reached[i]) return;
+    const z = elevations[i];
+    if (isNoData(z) || !canPass(z)) return;
+    reached[i] = 1;
+    if (canPaint(z)) assigned[i] = wse;
+    queue.push(i);
+  };
+
+  for (const seed of seeds) enqueue(seed.i);
+
+  const neighbors = [-1, 1, -width, width, -width - 1, -width + 1, width - 1, width + 1];
+  while (qHead < queue.length) {
+    const i = queue[qHead];
+    qHead += 1;
     const col = i % width;
     for (const d of neighbors) {
       const j = i + d;
       if (j < 0 || j >= n) continue;
       const ncol = j % width;
       if (Math.abs(ncol - col) > 1) continue;
-      const z = elevations[j];
-      if (isNoData(z) || z >= wse) continue;
-      if (!Number.isFinite(assigned[j]) || wse > assigned[j] + 0.01) {
-        assigned[j] = wse;
-        queue.push(j);
-      }
+      enqueue(j);
     }
   }
 
@@ -181,9 +251,15 @@ export async function renderSpillHeatmap(
     pixels[o + 3] = a;
   }
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext("2d")?.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return createImageBitmap(canvas);
+  const cropTo = viewBbox ?? bbox;
+  const crop = viewCropRect(bbox, cropTo, width, height);
+  canvas.width = crop.cw;
+  canvas.height = crop.ch;
+  const cropped = new Uint8ClampedArray(crop.cw * crop.ch * 4);
+  for (let y = 0; y < crop.ch; y += 1) {
+    const srcOff = ((crop.y0 + y) * width + crop.x0) * 4;
+    cropped.set(pixels.subarray(srcOff, srcOff + crop.cw * 4), y * crop.cw * 4);
+  }
+  canvas.getContext("2d")?.putImageData(new ImageData(cropped, crop.cw, crop.ch), 0, 0);
+  return canvas;
 }
