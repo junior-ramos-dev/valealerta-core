@@ -30,9 +30,19 @@ export function SidebarDock({
         id="sidebar-help-rail"
         className={`sidebar-dock${helpOpen ? " is-help-open" : ""}`}
       >
-        <div className="sidebar-main">{children}</div>
+        <div className="sheet-handle">
+          <span className="sheet-handle-bar" aria-hidden />
+          <span className="sheet-handle-label">
+            {helpOpen
+              ? "Deslize os cards de ajuda"
+              : "Role para ver todos os controles"}
+          </span>
+        </div>
         <div className="sidebar-help-rail" aria-hidden={!helpOpen}>
           <div className="sidebar-help-rail-inner" ref={setRailEl} />
+        </div>
+        <div id="sidebar-main" className="sidebar-main">
+          {children}
         </div>
       </aside>
     </HelpContext.Provider>
@@ -66,11 +76,14 @@ export function SidebarSection({
   id,
   title,
   help,
+  slot = "more",
   children,
 }: {
   id: string;
   title?: string;
   help?: ReactNode;
+  /** On the phone sheet, peek blocks sit first; more follows in the same scroll. */
+  slot?: "peek" | "more";
   children: ReactNode;
 }) {
   const ctx = useContext(HelpContext);
@@ -78,7 +91,8 @@ export function SidebarSection({
   return (
     <>
       <div
-        className={`sidebar-block${hot ? " is-hot" : ""}`}
+        className={`sidebar-block sidebar-slot-${slot}${hot ? " is-hot" : ""}`}
+        data-id={id}
         onMouseEnter={() => ctx?.setHoverId(id)}
         onMouseLeave={() => ctx?.setHoverId(null)}
       >

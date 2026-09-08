@@ -103,6 +103,74 @@ function patchDemCaption(p: {
   return `ativo no modelo${zBit}`;
 }
 
+type MapProbe = {
+  lon: number;
+  lat: number;
+  zM: number | null;
+  pinned: boolean;
+  origin: "cursor" | "center" | "pin";
+  x: number;
+  y: number;
+};
+
+function MapProbeFields({
+  probe,
+  staffNowM,
+  thalwegM,
+  waterSurfaceM,
+  onFollowMap,
+}: {
+  probe: MapProbe;
+  staffNowM: number;
+  thalwegM: number | null;
+  waterSurfaceM: number | null;
+  onFollowMap: () => void;
+}) {
+  return (
+    <>
+      <div className="map-probe-coords">{fmtLatLon(probe.lat, probe.lon)}</div>
+      <div className="map-probe-meta">
+        Terreno{" "}
+        {probe.zM != null && Number.isFinite(probe.zM)
+          ? `${probe.zM.toFixed(1)} m`
+          : "—"}{" "}
+        <span className="map-probe-hint map-probe-hint-detail">
+          (Copernicus GLO-30 ~30 m · aterro recente pode não estar no relevo)
+        </span>
+      </div>
+      <div className="map-probe-meta">
+        Régua {staffNowM.toFixed(2)} m
+        {thalwegM != null && Number.isFinite(thalwegM)
+          ? ` · leito ~${thalwegM.toFixed(1)} m`
+          : ""}
+        {waterSurfaceM != null
+          ? ` · superfície d’água ~${waterSurfaceM.toFixed(1)} m`
+          : ""}
+      </div>
+      {probe.zM != null && waterSurfaceM != null && (
+        <div className="map-probe-rel">
+          {probe.zM - waterSurfaceM >= 0
+            ? `${(probe.zM - waterSurfaceM).toFixed(1)} m acima da água`
+            : `${(waterSurfaceM - probe.zM).toFixed(1)} m abaixo da água (inundado)`}
+        </div>
+      )}
+      <div className="map-probe-actions">
+        {probe.pinned ? (
+          <button type="button" onClick={onFollowMap}>
+            Seguir o mapa
+          </button>
+        ) : (
+          <span className="map-probe-hint">
+            {probe.origin === "center"
+              ? "Centro da vista · toque no mapa para fixar"
+              : "Clique no mapa para fixar o ponto"}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
 function liveStageCm(hydro: HydroSnapshot | null): number | null {
   const v = hydro?.gauge_stage_cm;
   if (v == null || !Number.isFinite(v) || v < 0) return null;
@@ -156,14 +224,11 @@ export default function App() {
   const [spillStageM, setSpillStageM] = useState(6);
   const [focusCityId, setFocusCityId] = useState<string>("");
   const [heatmapEpoch, setHeatmapEpoch] = useState(0);
-  const [probe, setProbe] = useState<{
-    lon: number;
-    lat: number;
-    zM: number | null;
-    pinned: boolean;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [probe, setProbe] = useState<MapProbe | null>(null);
+  const [hudHeld, setHudHeld] = useState(false);
+  const [sheetLayout, setSheetLayout] = useState(
+    () => window.matchMedia("(max-width: 768px)").matches,
+  );
   const [thalwegM, setThalwegM] = useState<number | null>(null);
   const probePinnedRef = useRef(false);
   const drawingRef = useRef(false);
@@ -493,11 +558,22 @@ export default function App() {
             riverBranchIdsForCity(getRegion(), focusCityIdRef.current),
           );
           setThalwegM(Number.isFinite(bed) ? bed : null);
-          setProbe((prev) =>
-            prev
-              ? { ...prev, zM: sampleElevationM(overlay, prev.lon, prev.lat) }
-              : prev,
-          );
+          setProbe((prev) => {
+            if (!prev) {
+              const c = map.getCenter();
+              const point = map.project(c);
+              return {
+                lon: c.lng,
+                lat: c.lat,
+                zM: sampleElevationM(overlay, c.lng, c.lat),
+                pinned: false,
+                origin: "center",
+                x: point.x,
+                y: point.y,
+              };
+            }
+            return { ...prev, zM: sampleElevationM(overlay, prev.lon, prev.lat) };
+          });
           if (gen !== fetchGen) return;
           setPatches((prev) => mergePatchChecks(prev, overlay.patchChecks));
           setTopoStatus("ready");
@@ -688,10 +764,11 @@ export default function App() {
       lat: number,
       pinned: boolean,
       point: { x: number; y: number },
+      origin: "cursor" | "center" | "pin",
     ) => {
       const dem = topoOverlayRef.current;
       const zM = dem ? sampleElevationM(dem, lon, lat) : null;
-      setProbe({ lon, lat, zM, pinned, x: point.x, y: point.y });
+      setProbe({ lon, lat, zM, pinned, origin, x: point.x, y: point.y });
       const src = map.getSource("probe-point") as GeoJSONSource | undefined;
       src?.setData(
         pinned
@@ -709,19 +786,34 @@ export default function App() {
       );
     };
 
+    const followMapCenter = () => {
+      if (probePinnedRef.current || drawingRef.current) return;
+      const c = map.getCenter();
+      applyProbe(c.lng, c.lat, false, map.project(c), "center");
+    };
+
     map.on("mousemove", (event) => {
       if (drawingRef.current || probePinnedRef.current) return;
+      if (window.matchMedia("(max-width: 768px)").matches) return;
       const { lng, lat } = event.lngLat;
       if (probeRaf) return;
       probeRaf = window.requestAnimationFrame(() => {
         probeRaf = 0;
-        applyProbe(lng, lat, false, event.point);
+        applyProbe(lng, lat, false, event.point, "cursor");
+      });
+    });
+
+    map.on("move", () => {
+      if (probePinnedRef.current || drawingRef.current) return;
+      if (probeRaf) return;
+      probeRaf = window.requestAnimationFrame(() => {
+        probeRaf = 0;
+        followMapCenter();
       });
     });
 
     map.on("mouseout", () => {
-      if (probePinnedRef.current) return;
-      setProbe(null);
+      followMapCenter();
     });
 
     map.on("click", (event) => {
@@ -744,8 +836,12 @@ export default function App() {
         return;
       }
       probePinnedRef.current = true;
-      applyProbe(event.lngLat.lng, event.lngLat.lat, true, event.point);
+      applyProbe(event.lngLat.lng, event.lngLat.lat, true, event.point, "pin");
     });
+
+    map.on("moveend", followMapCenter);
+    if (map.loaded()) followMapCenter();
+    else map.once("load", followMapCenter);
 
     return () => {
       abort.abort();
@@ -875,6 +971,13 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [helpOpen]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const onChange = () => setSheetLayout(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     if (!drawingPatch || !canEditPatches) return;
@@ -1012,6 +1115,28 @@ export default function App() {
     thalwegM != null && Number.isFinite(thalwegM)
       ? thalwegM + overbankM * floodOccupancy(timeWindow, 0)
       : null;
+  const followMapProbe = () => {
+    probePinnedRef.current = false;
+    const map = mapRef.current;
+    const src = map?.getSource("probe-point") as GeoJSONSource | undefined;
+    src?.setData({ type: "FeatureCollection", features: [] });
+    if (!map) {
+      setProbe(null);
+      return;
+    }
+    const c = map.getCenter();
+    const point = map.project(c);
+    const dem = topoOverlayRef.current;
+    setProbe({
+      lon: c.lng,
+      lat: c.lat,
+      zM: dem ? sampleElevationM(dem, c.lng, c.lat) : null,
+      pinned: false,
+      origin: "center",
+      x: point.x,
+      y: point.y,
+    });
+  };
   const floodDepthM =
     probe?.zM != null && waterSurfaceM != null
       ? waterSurfaceM - probe.zM
@@ -1030,22 +1155,13 @@ export default function App() {
       : null;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        width: "100%",
-        height: "100%",
-        background: "#111",
-        color: "#fff",
-        overflow: "hidden",
-        fontFamily: "sans-serif",
-      }}
-    >
+    <div className="app-shell">
       <SidebarDock helpOpen={helpOpen}>
         <SidebarSection
           id="titulo"
+          slot="peek"
           title={region.title}
-          help="Esta coluna descreve o controle à esquerda. O botão Ajuda abre e fecha o painel. Esc também fecha. Passe o mouse num bloco ou numa caixa para ver o par correspondente."
+          help="O botão Ajuda abre o painel de textos. Esc fecha. No computador, passe o mouse num bloco para ver o par. No celular, a barra vira uma folha baixa na base da tela — o mapa continua visível. Role a folha para overlay, escala e patches."
         >
           <div className="sidebar-title-row">
             <div>
@@ -1072,6 +1188,7 @@ export default function App() {
 
         <SidebarSection
           id="bacia"
+          slot="more"
           title="Bacia"
           help="Troca o pacote da bacia (cidades, estações ANA, cotas e textos). Cada vale tem calibração própria — não copie cotas de transbordo entre bacias."
         >
@@ -1126,6 +1243,7 @@ export default function App() {
 
         <SidebarSection
           id="municipio"
+          slot="peek"
           title="Município do vale"
           help={
             <>
@@ -1190,6 +1308,7 @@ export default function App() {
               </option>
             ))}
           </select>
+          <div className="sheet-expanded-only">
           <p
             style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}
           >
@@ -1202,6 +1321,7 @@ export default function App() {
               {region.copy.region_blurb}
             </p>
           ) : null}
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -1238,6 +1358,7 @@ export default function App() {
 
         <SidebarSection
           id="overlay"
+          slot="more"
           title="Overlay de relevo (Copernicus)"
           help="Hillshade do Copernicus DEM GLO-30 (30 m) na área visível. Após mover o mapa ou trocar de cidade, espera 1 s e recarrega relevo + heatmap. O slider só muda a opacidade."
         >
@@ -1284,6 +1405,7 @@ export default function App() {
 
         <SidebarSection
           id="escala"
+          slot="more"
           title="Escala de profundidade (cm)"
           help={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×${hydroCfg.rain_runoff_coeff} + Q/${hydroCfg.valley_width_factor}).`}
         >
@@ -1341,6 +1463,7 @@ export default function App() {
 
         <SidebarSection
           id="regua"
+          slot="peek"
           title="Nível do rio (régua)"
           help={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. Transbordo de ${cityStaff.city_name}: ${cityStaff.spill_stage_min_m} a ${cityStaff.spill_stage_max_m} m. ${cityStaff.spill_note}`}
         >
@@ -1444,6 +1567,7 @@ export default function App() {
 
         <SidebarSection
           id="tempo-real"
+          slot="peek"
           title="Tempo Real"
           help="Ligado: mostra a cota ANA atual e ela vira o mínimo da régua — dá para simular acima, não abaixo. Desligado: a régua vai de 0 até o teto, livre. Arrastar a previsão de chuva liga este modo sozinho, para a mancha não partir de um rio “normal” se a ANA já estiver um metro acima. Resetar segue o mesmo modo."
         >
@@ -1483,6 +1607,7 @@ export default function App() {
 
         <SidebarSection
           id="chuva-24h"
+          slot="more"
           title="Próximas 24 h"
           help="Volume previsto nas próximas 24 horas a montante — não é o mesmo que o dia 1 do slider (resto de hoje no fuso de São Paulo). A subida usa chuva efetiva × coeficiente da bacia, sobre a cota da régua. Mover o slider de previsão liga Tempo Real para essa cota não ficar abaixo da ANA."
         >
@@ -1513,6 +1638,7 @@ export default function App() {
 
         <SidebarSection
           id="acumulo"
+          slot="peek"
           title="Acúmulo previsto (Open-Meteo)"
           help={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar liga Tempo Real e pinta o heatmap Previsão. A chuva efetiva (mm) sobe a régua em mm × ${hydroCfg.rain_runoff_coeff} — 32 mm ≈ +1,6 m na cota, não 32 cm nem 2 m de rua. A mancha só aparece quando a cota prevista passa do transbordo deste município. Sem a cota ao vivo, a mancha pode parecer leve se o rio já estiver cheio. Meia-vida do balde: ${hydroCfg.rain_storage_halflife_h} h.`}
         >
@@ -1588,7 +1714,7 @@ export default function App() {
             }}
             style={{ width: "100%", cursor: "pointer" }}
           />
-          <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.45 }}>
+          <p className="sheet-expanded-only" style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.45 }}>
             Bruto {forecastRainGrossMm.toFixed(0)} mm · efetivo{" "}
             {forecastRainMm.toFixed(0)} mm → subida +{displayRise.toFixed(2)} m
             na régua (não são {forecastRainMm.toFixed(0)} cm de lâmina). Cota{" "}
@@ -1603,6 +1729,7 @@ export default function App() {
 
         <SidebarSection
           id="janela"
+          slot="more"
           title="Janela de escape"
           help={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: ${surge?.name ?? "montante"} em ~${surgeLagH(region)} h) e depois a água volta ao leito em cerca de ${hydroCfg.overbank_drain_h} h. Em ${region.copy.target_short}, +${timeWindow} h deixa cerca de ${Math.round(targetOccupancy * 100)}% da lâmina de pico ainda na planície.`}
         >
@@ -1641,6 +1768,7 @@ export default function App() {
 
         <SidebarSection
           id="delta-h"
+          slot="more"
           title="ΔH chuva efetiva"
           help={`Subida pela chuva efetiva (não a soma bruta): mm do balde × ${hydroCfg.rain_runoff_coeff}. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps.`}
         >
@@ -1688,6 +1816,7 @@ export default function App() {
         {liveRiver && (
           <SidebarSection
             id="agora-no-rio"
+            slot="more"
             title="Agora no rio"
             help="Telemetria ANA HidroWeb das estações do pacote. Offline usa o fallback da bacia. A cota ao vivo é o piso da régua."
           >
@@ -1722,8 +1851,44 @@ export default function App() {
           </SidebarSection>
         )}
 
+        {sheetLayout ? (
+        <SidebarSection
+          id="sonda"
+          slot="more"
+          title="Sonda do mapa"
+          help="No celular a cota e as coordenadas ficam nesta lista, junto da correção de relevo — quem demarca um aterro precisa do ponto. No computador elas ficam no card do mapa, com a data. Toque no mapa para fixar; Seguir o mapa volta ao centro da vista."
+        >
+          <div className="sidebar-probe">
+            <label
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                color: "#888",
+                fontWeight: "bold",
+              }}
+            >
+              Sonda do mapa
+            </label>
+            {probe ? (
+              <MapProbeFields
+                probe={probe}
+                staffNowM={staffNowM}
+                thalwegM={thalwegM}
+                waterSurfaceM={waterSurfaceM}
+                onFollowMap={followMapProbe}
+              />
+            ) : (
+              <p className="map-probe-meta">
+                Carregando cota do centro da vista…
+              </p>
+            )}
+          </div>
+        </SidebarSection>
+        ) : null}
+
         <SidebarSection
           id="correcao-relevo"
+          slot="more"
           title="Correção de relevo (aterro)"
           help="O Copernicus não vê obra recente. Só contas autorizadas demarcam o polígono e o Δz. Login dummy até existir autenticação de verdade (usuário usuario). Se uma revisão futura do GLO-30 já incluir a obra, o Vale Alerta compara a cota atual com a cota gravada na criação e deixa de somar o patch (absorvido). Δz pequeno perto do ruído de 2–4 m do DEM pede conferência manual."
         >
@@ -2111,38 +2276,50 @@ export default function App() {
         </SidebarSection>
       </SidebarDock>
 
-      <div
-        style={{ flex: 1, position: "relative", width: "100%", height: "100%" }}
-      >
-        <div className="map-layer-flag" aria-live="polite">
-          <span className="layer-lamp-dot on" />
-          <span className="map-layer-flag-text">
-            <span className="map-layer-flag-date">
-              {heatmapMode === "now" ? todayLabel : forecastDayLabel}
+      <div className="map-stage">
+        <div
+          className={`map-hud${hudHeld ? " is-held" : ""}`}
+          aria-live="polite"
+          onPointerDown={() => setHudHeld(true)}
+          onPointerUp={() => setHudHeld(false)}
+          onPointerCancel={() => setHudHeld(false)}
+          onPointerLeave={() => setHudHeld(false)}
+        >
+          <div className="map-hud-status">
+            <span className="layer-lamp-dot on" />
+            <span className="map-layer-flag-text">
+              <span className="map-layer-flag-date">
+                {heatmapMode === "now" ? todayLabel : forecastDayLabel}
+              </span>
+              <span className="map-layer-flag-meta">
+                {heatmapMode === "now"
+                  ? overbankM > 0
+                    ? `Agora · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
+                    : `Agora · na calha · +${timeWindow}h`
+                  : overbankM > 0
+                    ? `Previsão · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
+                    : `Previsão · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`}
+              </span>
             </span>
-            <span className="map-layer-flag-meta">
-              {heatmapMode === "now"
-                ? overbankM > 0
-                  ? `Agora · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
-                  : `Agora · na calha · +${timeWindow}h`
-                : overbankM > 0
-                  ? `Previsão · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
-                  : `Previsão · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`}
-            </span>
-          </span>
+          </div>
+          {!sheetLayout && probe ? (
+            <div className="map-hud-probe">
+              <MapProbeFields
+                probe={probe}
+                staffNowM={staffNowM}
+                thalwegM={thalwegM}
+                waterSurfaceM={waterSurfaceM}
+                onFollowMap={followMapProbe}
+              />
+            </div>
+          ) : null}
         </div>
         <div
           ref={mapContainerRef}
-          style={{
-            width: "100%",
-            height: "100%",
-            position: "absolute",
-            top: 0,
-            left: 0,
-            cursor: "crosshair",
-          }}
+          className="map-canvas"
         />
         {probe &&
+          probe.origin !== "center" &&
           !drawingPatch &&
           floodStop != null &&
           floodDepthM != null &&
@@ -2181,62 +2358,6 @@ export default function App() {
               </div>
             </div>
           )}
-        {probe && (
-          <div className="map-probe">
-            <div className="map-probe-coords">
-              {fmtLatLon(probe.lat, probe.lon)}
-            </div>
-            <div className="map-probe-meta">
-              Terreno{" "}
-              {probe.zM != null && Number.isFinite(probe.zM)
-                ? `${probe.zM.toFixed(1)} m`
-                : "—"}{" "}
-              <span className="map-probe-hint">
-                (Copernicus GLO-30 ~30 m · aterro recente pode não estar no
-                relevo)
-              </span>
-            </div>
-            <div className="map-probe-meta">
-              Régua {staffNowM.toFixed(2)} m
-              {thalwegM != null && Number.isFinite(thalwegM)
-                ? ` · leito ~${thalwegM.toFixed(1)} m`
-                : ""}
-              {waterSurfaceM != null
-                ? ` · superfície d’água ~${waterSurfaceM.toFixed(1)} m`
-                : ""}
-            </div>
-            {probe.zM != null && waterSurfaceM != null && (
-              <div className="map-probe-rel">
-                {probe.zM - waterSurfaceM >= 0
-                  ? `${(probe.zM - waterSurfaceM).toFixed(1)} m acima da água`
-                  : `${(waterSurfaceM - probe.zM).toFixed(1)} m abaixo da água (inundado)`}
-              </div>
-            )}
-            <div className="map-probe-actions">
-              {probe.pinned ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    probePinnedRef.current = false;
-                    setProbe((prev) =>
-                      prev ? { ...prev, pinned: false } : prev,
-                    );
-                    const src = mapRef.current?.getSource("probe-point") as
-                      | GeoJSONSource
-                      | undefined;
-                    src?.setData({ type: "FeatureCollection", features: [] });
-                  }}
-                >
-                  Seguir mouse
-                </button>
-              ) : (
-                <span className="map-probe-hint">
-                  Clique no mapa para fixar o ponto
-                </span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
