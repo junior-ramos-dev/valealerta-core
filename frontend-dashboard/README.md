@@ -70,6 +70,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 - [Sonda do terreno](#sonda-do-terreno)
 - [Correção de relevo (demarcação / aterro)](#correção-de-relevo-demarcação--aterro)
 - [Backend e configuração regional](#backend-e-configuração-regional)
+- [App no celular (PWA)](#app-no-celular-pwa)
 
 ### Mapa híbrido e navegação
 
@@ -270,6 +271,24 @@ npm run dev
 ```
 
 Abra o endereço do terminal (em geral `http://localhost:5173`). O mapa inicia em São João Batista; use o seletor de município e os modos **Agora** / **Previsão 7d**.
+
+Para **instalar como PWA** (ícone na tela inicial, service worker), use HTTPS ou `localhost` com o build de produção:
+
+```bash
+cd frontend-dashboard
+npm run build
+npm run preview
+```
+
+O `npm run dev` não registra o worker (evita briga com o HMR). No celular, abra o preview (ou o host HTTPS), use **Baixar esta bacia para o celular** com internet, depois Instalar aplicativo / Adicionar à tela de início.
+
+### App no celular (PWA)
+
+- Precache: casco do app, `regions/*.json`, patches, ícones.
+- Último retrato Open-Meteo + ANA em **IndexedDB** (`fetched_at`). Offline, Tempo Real usa essa cota, não a ANA ao vivo. A previsão **envelhece** (faixa amarela no mapa).
+- Copernicus DEM: tiles da bbox da bacia após **Baixar esta bacia** (dezenas de MB). Pan para uma área sem tile = sem heatmap.
+- Basemap Esri/CARTO: só tiles já vistos.
+- Não fica “ao vivo” sem rede: ANA nova, Open-Meteo novo, DEM não baixado.
 
 ### 2. Pipeline de dados (Python, opcional)
 

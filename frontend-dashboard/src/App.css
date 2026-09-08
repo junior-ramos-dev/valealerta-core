@@ -267,10 +267,42 @@
   border-color: #444;
 }
 
+.map-hud-offline {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: #ffd166;
+  letter-spacing: 0.01em;
+}
+
 .map-hud-status {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.basin-offline-btn {
+  width: 100%;
+  background: #1c3a4a;
+  color: #7fdbfa;
+  border: 1px solid #00b4d8;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.basin-offline-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.basin-offline-note {
+  margin: 0;
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.4;
 }
 
 .map-layer-flag-text {

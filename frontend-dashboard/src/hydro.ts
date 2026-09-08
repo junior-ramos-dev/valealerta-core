@@ -7,6 +7,7 @@
  */
 
 import type { Feature, FeatureCollection } from "geojson";
+import { readCachedHydro, writeCachedHydro } from "./hydroCache";
 import { getRegion, surgeLagH } from "./region";
 
 export type CityRain = {
@@ -38,6 +39,8 @@ export type GaugeReading = {
 
 export type HydroSnapshot = {
   fetched_at: string;
+  /** True when Open-Meteo/ANA failed and this is the last snapshot saved on the device. */
+  from_cache?: boolean;
   region_id: string;
   upstream_rain_12h_mm: number;
   upstream_rain_3h_mm: number;
@@ -266,7 +269,53 @@ function meanUpstreamMetric(
   return round2(upstream.reduce((s, r) => s + metric(r), 0) / upstream.length);
 }
 
+export function formatHydroClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: HYDRO_TZ,
+  });
+}
+
+/** Label when the saved forecast is not from today (São Paulo calendar). */
+export function hydroForecastAgeLabel(iso: string): string | null {
+  const dayKey = (value: Date) =>
+    value.toLocaleDateString("en-CA", { timeZone: HYDRO_TZ });
+  const fetched = new Date(iso);
+  const now = new Date();
+  if (dayKey(fetched) === dayKey(now)) return null;
+  const [fy, fm, fd] = dayKey(fetched).split("-").map(Number);
+  const [ny, nm, nd] = dayKey(now).split("-").map(Number);
+  const days = Math.round(
+    (Date.UTC(ny, nm - 1, nd) - Date.UTC(fy, fm - 1, fd)) / 86_400_000,
+  );
+  if (days === 1) return "Previsão de ontem";
+  return `Previsão de ${fetched.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: HYDRO_TZ,
+  })}`;
+}
+
 export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnapshot> {
+  const pack = getRegion();
+  try {
+    const snap = await fetchLiveHydroSnapshot(signal);
+    try {
+      await writeCachedHydro(pack.id, snap);
+    } catch (error) {
+      console.warn("Não gravou o retrato hidrológico no aparelho.", error);
+    }
+    return { ...snap, from_cache: false };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const cached = await readCachedHydro(pack.id);
+    if (cached) return { ...cached, from_cache: true };
+    throw error;
+  }
+}
+
+async function fetchLiveHydroSnapshot(signal?: AbortSignal): Promise<HydroSnapshot> {
   const pack = getRegion();
   const rainfall = await fetchOpenMeteo(signal);
   const gauges: GaugeReading[] = [];

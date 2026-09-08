@@ -16,6 +16,8 @@ import {
 import {
   cityPointsGeoJSON,
   loadHydroSnapshot,
+  formatHydroClock,
+  hydroForecastAgeLabel,
   rainForForecastDays,
   rainForHorizon,
   grossRainForForecastDays,
@@ -44,6 +46,7 @@ import {
   type RegionCatalog,
   type RegionPack,
 } from "./region";
+import { prepareBasinOffline } from "./offlineBasin";
 import {
   renderSpillHeatmap,
   DEPTH_SCALE,
@@ -177,6 +180,23 @@ function liveStageCm(hydro: HydroSnapshot | null): number | null {
   return Math.round(v);
 }
 
+function hydroStatusBanner(
+  online: boolean,
+  hydro: HydroSnapshot | null,
+): string | null {
+  if (online && !hydro?.from_cache) return null;
+  const clock = hydro ? formatHydroClock(hydro.fetched_at) : null;
+  const age = hydro ? hydroForecastAgeLabel(hydro.fetched_at) : null;
+  const base = online
+    ? clock
+      ? `Sem dados ao vivo · última cota ${clock}`
+      : "Sem dados ao vivo"
+    : clock
+      ? `Offline · cota ANA de ${clock}`
+      : "Offline";
+  return age ? `${base} · ${age}` : base;
+}
+
 function LayerLamp({ on, liveLabel }: { on: boolean; liveLabel: string }) {
   return (
     <span
@@ -220,6 +240,11 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [hydro, setHydro] = useState<HydroSnapshot | null>(null);
   const [hydroError, setHydroError] = useState<string | null>(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [basinPrep, setBasinPrep] = useState<"idle" | "working" | "done" | "error">(
+    "idle",
+  );
+  const [basinPrepNote, setBasinPrepNote] = useState<string | null>(null);
   const [waterLevelCm, setWaterLevelCm] = useState(30);
   const [spillStageM, setSpillStageM] = useState(6);
   const [focusCityId, setFocusCityId] = useState<string>("");
@@ -1023,6 +1048,22 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  useEffect(() => {
+    setBasinPrep("idle");
+    setBasinPrepNote(null);
+  }, [region?.id]);
+
+  useEffect(() => {
     if (!region) return;
     const abort = new AbortController();
     loadHydroSnapshot(abort.signal)
@@ -1033,7 +1074,9 @@ export default function App() {
       .catch((error: unknown) => {
         if (abort.signal.aborted) return;
         console.error(error);
-        setHydroError("Falha ao cruzar Open-Meteo e ANA HidroWeb.");
+        setHydroError(
+          "Sem Open-Meteo/ANA e sem retrato hidrológico salvo neste aparelho.",
+        );
       });
     return () => abort.abort();
   }, [region?.id]);
@@ -1067,6 +1110,7 @@ export default function App() {
 
   const cities = region.cities;
   const hydroCfg = region.hydro;
+  const statusBanner = hydroStatusBanner(online, hydro);
   const cityStaff = staffForCity(region, focusCityId || region.target_city_id);
   const liveMinCm = liveRiver ? liveStageCm(hydro) : null;
   const reguaMinCm = liveMinCm ?? 0;
@@ -1190,7 +1234,7 @@ export default function App() {
           id="bacia"
           slot="more"
           title="Bacia"
-          help="Troca o pacote da bacia (cidades, estações ANA, cotas e textos). Cada vale tem calibração própria — não copie cotas de transbordo entre bacias."
+          help="Troca o pacote da bacia (cidades, estações ANA, cotas e textos). Cada vale tem calibração própria — não copie cotas de transbordo entre bacias. Baixar esta bacia grava o pacote, o último retrato Open-Meteo/ANA e os tiles Copernicus da bbox — sem isso o PWA instalado é só o casco do app."
         >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label
@@ -1237,6 +1281,41 @@ export default function App() {
             >
               Pacote provisório — {region.calibration.note}
             </p>
+          )}
+          <button
+            type="button"
+            className="basin-offline-btn"
+            disabled={basinPrep === "working"}
+            onClick={() => {
+              const pack = region;
+              const abort = new AbortController();
+              setBasinPrep("working");
+              setBasinPrepNote("Baixando pacote, cota ANA e relevo Copernicus…");
+              void prepareBasinOffline(pack, abort.signal)
+                .then((result) => {
+                  setHydro(result.hydro);
+                  setHydroError(null);
+                  setBasinPrep("done");
+                  const clock = formatHydroClock(result.hydro.fetched_at);
+                  setBasinPrepNote(
+                    `Pronto: ${result.tiles} tile${result.tiles === 1 ? "" : "s"} DEM · cota ANA de ${clock}. Instale o app pelo menu do navegador.`,
+                  );
+                })
+                .catch((error: unknown) => {
+                  console.error(error);
+                  setBasinPrep("error");
+                  setBasinPrepNote(
+                    "Não deu para preparar o offline. Conecte-se e tente de novo.",
+                  );
+                });
+            }}
+          >
+            {basinPrep === "working"
+              ? "Baixando…"
+              : "Baixar esta bacia para o celular"}
+          </button>
+          {basinPrepNote && (
+            <p className="basin-offline-note">{basinPrepNote}</p>
           )}
         </div>
         </SidebarSection>
@@ -1818,7 +1897,7 @@ export default function App() {
             id="agora-no-rio"
             slot="more"
             title="Agora no rio"
-            help="Telemetria ANA HidroWeb das estações do pacote. Offline usa o fallback da bacia. A cota ao vivo é o piso da régua."
+            help="Telemetria ANA HidroWeb das estações do pacote. Sem rede, o app usa o último retrato gravado neste aparelho (não é cota ao vivo). A cota da ANA é o piso da régua em Tempo Real."
           >
           <div style={{ fontSize: "12px", color: "#bbb", lineHeight: "1.45" }}>
             {hydroError && <p style={{ color: "#e63946" }}>{hydroError}</p>}
@@ -2285,6 +2364,11 @@ export default function App() {
           onPointerCancel={() => setHudHeld(false)}
           onPointerLeave={() => setHudHeld(false)}
         >
+          {statusBanner ? (
+            <div className="map-hud-offline" role="status">
+              {statusBanner}
+            </div>
+          ) : null}
           <div className="map-hud-status">
             <span className="layer-lamp-dot on" />
             <span className="map-layer-flag-text">

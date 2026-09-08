@@ -3,7 +3,7 @@
  * usada no heatmap. Coordenadas do overlay = bbox do grid (não o viewport),
  * senão a mancha cola na tela no pan. Folga FLOOD_PAD_M para o rio não sair da malha.
  */
-import { fromUrl, type GeoTIFF } from "geotiff";
+import { fromArrayBuffer, fromUrl, type GeoTIFF } from "geotiff";
 import type { TopoPatchFeature } from "./topoPatches";
 import {
   applyPatchesToElevations,
@@ -211,17 +211,63 @@ function canvasSize(bbox: LonLatBBox): { width: number; height: number } {
   };
 }
 
+async function tiffFromCache(url: string): Promise<GeoTIFF | null> {
+  if (typeof caches === "undefined") return null;
+  try {
+    const hit = await caches.match(url);
+    if (!hit?.ok) return null;
+    return fromArrayBuffer(await hit.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 function getTiff(key: string): Promise<GeoTIFF | null> {
   let pending = TIFF_CACHE.get(key);
   if (!pending) {
-    pending = fromUrl(`/copernicus-dem/${key}`).catch((error: unknown) => {
-      TIFF_CACHE.delete(key);
-      console.warn(`Copernicus COG unavailable: ${key}`, error);
-      return null;
-    });
+    const url = `/copernicus-dem/${key}`;
+    pending = (async () => {
+      const cached = await tiffFromCache(url);
+      if (cached) return cached;
+      try {
+        return await fromUrl(url);
+      } catch (error: unknown) {
+        TIFF_CACHE.delete(key);
+        console.warn(`Copernicus COG unavailable: ${key}`, error);
+        return null;
+      }
+    })();
     TIFF_CACHE.set(key, pending);
   }
   return pending;
+}
+
+/** Full-file GET of basin COGs so heatmap works offline after “Baixar esta bacia”. */
+export async function prefetchDemTiles(
+  bbox: LonLatBBox,
+  signal?: AbortSignal,
+): Promise<number> {
+  if (typeof caches === "undefined") return 0;
+  const cache = await caches.open("valealerta-copernicus-dem");
+  let saved = 0;
+  for (const tile of tilesForBbox(bbox)) {
+    if (signal?.aborted) break;
+    const url = `/copernicus-dem/${cogKey(tile.south, tile.west)}`;
+    const existing = await cache.match(url);
+    if (existing?.ok) {
+      saved += 1;
+      continue;
+    }
+    try {
+      const res = await fetch(url, { signal });
+      if (!res.ok) continue;
+      await cache.put(url, res.clone());
+      saved += 1;
+    } catch {
+      /* tile stays online-only */
+    }
+  }
+  return saved;
 }
 
 function isNoData(value: number): boolean {
