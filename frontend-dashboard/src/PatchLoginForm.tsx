@@ -1,6 +1,5 @@
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { tryDummyLogin } from "./dummyAuth";
-import { InfoTip } from "./InfoTip";
 
 const fieldStyle: CSSProperties = {
   width: "100%",
@@ -35,7 +34,6 @@ export function PatchLoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
     >
       <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}>
         Demarcar aterro exige autorização. Entre com a conta provisória.
-        <InfoTip text="Login dummy até existir autenticação de verdade. Usuário autorizado: usuario. Só depois disso o formulário de polígono e Δz aparece." />
       </p>
       <label style={{ fontSize: 11, color: "#aaa" }}>
         Usuário

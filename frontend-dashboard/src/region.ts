@@ -19,6 +19,8 @@ export type RegionCity = {
   spill_stage_stops_m?: number[];
   normal_stage_cm?: number;
   spill_note?: string;
+  /** `main`, tributary id, or `*` for all branches (foz). Omit = all. */
+  river_branch_id?: string;
 };
 
 export type CityStaff = {
@@ -38,6 +40,13 @@ export type RegionGauge = {
   name: string;
   code: string;
   tracks?: string;
+};
+
+export type RiverBranch = {
+  id: string;
+  name: string;
+  coordinates: [number, number][];
+  reach_lags_h: number[];
 };
 
 export type RegionPack = {
@@ -65,6 +74,7 @@ export type RegionPack = {
   cities: RegionCity[];
   river_thalweg: [number, number][];
   reach_lags_h: number[];
+  river_branches: RiverBranch[];
   gauges: { provider: string; endpoint: string; stations: RegionGauge[] };
   hydro: {
     rain_runoff_coeff: number;
@@ -138,6 +148,7 @@ export function storeRegionId(id: string): void {
   }
 }
 
+/** Horas da onda da cidade de surge até o alvo (janela de escape / ocupação da planície). */
 export function surgeLagH(pack: RegionPack = getRegion()): number {
   const city = pack.cities.find((c) => c.id === pack.surge_city_id);
   return city?.lag_to_target_h ?? 4;
@@ -159,7 +170,10 @@ function stopsAround(spill: number, min: number, max: number, step: number, extr
   return uniqueSorted(out);
 }
 
-/** Régua / transbordo of a municipality; basin hydro is only the fallback. */
+/**
+ * Régua e cota de transbordo do município. O hydro da bacia só entra se a cidade
+ * não tiver spill próprio — não copiar 8 m de Blumenau para Brusque.
+ */
 export function staffForCity(pack: RegionPack, cityId: string): CityStaff {
   const h = pack.hydro;
   const city = pack.cities.find((c) => c.id === cityId) ?? pack.cities.find((c) => c.id === pack.target_city_id);
@@ -183,6 +197,7 @@ export function staffForCity(pack: RegionPack, cityId: string): CityStaff {
   };
 }
 
+/** Município mais próximo em lon/lat (sonda do mapa / foco da régua). */
 export function nearestCity(pack: RegionPack, lon: number, lat: number): RegionCity {
   let best = pack.cities[0];
   let bestD = Infinity;
@@ -194,6 +209,20 @@ export function nearestCity(pack: RegionPack, lon: number, lat: number): RegionC
     }
   }
   return best;
+}
+
+/**
+ * Braços do rio a semear no heatmap. `undefined` = todos (bacia de um talvegue ou foz `*`).
+ * Ex.: Brusque → `["itajai-mirim"]`; Blumenau → `["main"]`.
+ */
+export function riverBranchIdsForCity(
+  pack: RegionPack,
+  cityId: string,
+): string[] | undefined {
+  const city = pack.cities.find((c) => c.id === cityId);
+  const id = city?.river_branch_id;
+  if (!id || id === "*") return undefined;
+  return [id];
 }
 
 function asCoord(pair: unknown): [number, number] | null {
@@ -234,6 +263,8 @@ function asCity(raw: Record<string, unknown>): RegionCity | null {
     spill_stage_stops_m: stopsRaw?.length ? stopsRaw : undefined,
     normal_stage_cm: optNum("normal_stage_cm"),
     spill_note: typeof raw.spill_note === "string" ? raw.spill_note : undefined,
+    river_branch_id:
+      typeof raw.river_branch_id === "string" ? raw.river_branch_id : undefined,
   };
 }
 
@@ -250,6 +281,25 @@ export function parseRegionPack(body: unknown): RegionPack {
     .map(asCoord)
     .filter((c): c is [number, number] => c != null);
   if (thalweg.length < 2) throw new Error("O pacote precisa de um talvegue (river_thalweg).");
+
+  const branches: RiverBranch[] = [];
+  for (const rawBranch of Array.isArray(raw.river_branches) ? raw.river_branches : []) {
+    if (!rawBranch || typeof rawBranch !== "object") continue;
+    const b = rawBranch as Record<string, unknown>;
+    const coordinates = (Array.isArray(b.coordinates) ? b.coordinates : [])
+      .map(asCoord)
+      .filter((c): c is [number, number] => c != null);
+    if (coordinates.length < 2) continue;
+    const branchLags = (Array.isArray(b.reach_lags_h) ? b.reach_lags_h : [])
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n));
+    branches.push({
+      id: String(b.id ?? "tributary"),
+      name: String(b.name ?? "Tributário"),
+      coordinates,
+      reach_lags_h: branchLags.length ? branchLags : [0],
+    });
+  }
 
   const lags = (Array.isArray(raw.reach_lags_h) ? raw.reach_lags_h : [])
     .map((n) => Number(n))
@@ -343,6 +393,7 @@ export function parseRegionPack(body: unknown): RegionPack {
     cities,
     river_thalweg: thalweg,
     reach_lags_h: lags,
+    river_branches: branches,
     gauges: {
       provider: String(gaugesRaw.provider ?? "ANA HidroWeb"),
       endpoint: String(gaugesRaw.endpoint ?? ""),

@@ -33,7 +33,8 @@ VALEALERTA_REGION=itajai python3 backend-satellite/fetch_hydro.py
 | `region.bbox` / `center` / `default_zoom` | Recorte e vista inicial |
 | `cities[]` | `id`, `name`, `lat`, `lon`, `zoom`, `role`, `lag_to_target_h`, `blurb`, e **por cidade**: `spill_stage_m`, `spill_stage_stops_m`, `normal_stage_cm`, `spill_note` (a UI usa isso no dropdown e na vista do mapa) |
 | `hydro.spill_stage_*` / `normal_stage_cm` | Fallback só se a cidade não tiver cota própria |
-| `river_thalweg` | LineString `[lon, lat]` do leito (sem isso o heatmap não nasce no rio) |
+| `river_thalweg` | LineString `[lon, lat]` do leito principal (sem isso o heatmap não nasce no rio) |
+| `river_branches` | Opcional. Outros LineStrings (tributários) com `id`, `name`, `coordinates`, `reach_lags_h`. O flood-fill nasce em todos os leitos, **sem** ligar um rio ao outro. |
 | `reach_lags_h` | Um lag por **segmento** do talvegue (`length` ≈ pontos − 1) |
 | `gauges.stations[]` | Códigos HidroWeb reais (`code`) |
 | `hydro.upstream_city_ids` | Quais cidades entram na média Open-Meteo a montante |
@@ -54,7 +55,7 @@ Arquivos opcionais:
 - Códigos ANA (invente nada: confira no [HidroWeb](https://www.snirh.gov.br/hidroweb)).
 - `lag_to_target_h` e `reach_lags_h` (tempos de viagem).
 - Coeficientes 0,05 e 250, salvo se um evento real mostrar que servem.
-- Talvegue: trace o rio da nova bacia (e tributários só se forem outro LineString no futuro).
+- Talvegue: trace o rio da nova bacia. Tributários entram em `river_branches` (LineString separado), não como um atalho no talvegue principal.
 
 Pacote de exemplo já no repositório: **`regions/itajai.json`** (Vale do Itajaí, alvo Blumenau). Está marcado `provisional` até validação com CEOPS/Defesa Civil e HidroWeb.
 

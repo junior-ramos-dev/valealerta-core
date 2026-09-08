@@ -53,6 +53,7 @@ def http_get(url: str, timeout: int = 25) -> str:
 
 
 def effective_rain_mm(precip: list[float], hours: int, half_life_h: float = 12) -> float:
+    """Pico do 'balde' horário: cada hora decai (meia-vida) e soma a precipitação nova."""
     n = min(len(precip), max(0, hours))
     decay = 0.5 ** (1 / half_life_h)
     store = 0.0
@@ -64,6 +65,7 @@ def effective_rain_mm(precip: list[float], hours: int, half_life_h: float = 12) 
 
 
 def fetch_open_meteo(cities: list[dict], hours: int = 12) -> list[dict]:
+    """Uma série Open-Meteo por município do pacote; cruzamento a montante fica em combine()."""
     lats = ",".join(str(c["lat"]) for c in cities)
     lons = ",".join(str(c["lon"]) for c in cities)
     query = urllib.parse.urlencode(
@@ -160,12 +162,14 @@ def fetch_ana_station(code: str, days: int = 2) -> dict:
 
 
 def route_stage_rise(rain_mm: float, flow_m3s: float, coeff: float, width_factor: float) -> float:
+    """ΔH (m) = chuva×coeff + Q/largura — mesma fórmula do cliente em hydro.ts."""
     rain_term = rain_mm * coeff
     flow_term = flow_m3s / width_factor if width_factor else 0.0
     return round(max(0.0, rain_term + flow_term), 3)
 
 
 def combine(pack: dict, rainfall: list[dict], gauges: list[dict]) -> dict:
+    """Cruza média Open-Meteo a montante com a última ANA online → snapshot hydro_now.json."""
     hydro = pack["hydro"]
     cities = pack.get("cities") or []
     upstream_ids = set(hydro.get("upstream_city_ids") or [])
@@ -178,6 +182,7 @@ def combine(pack: dict, rainfall: list[dict], gauges: list[dict]) -> dict:
 
     live = [g for g in gauges if g["online"] and g.get("flow_m3s") is not None]
     flow = live[-1]["flow_m3s"] if live else 0.0
+    # Cota: última estação online que trouxe nível (cm na régua ANA).
     stage_cm = next((g["stage_cm"] for g in reversed(live) if g.get("stage_cm") is not None), None)
 
     rise = route_stage_rise(

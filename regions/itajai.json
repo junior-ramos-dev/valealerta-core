@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "itajai",
   "title": "Vale Alerta para Enchentes",
-  "subtitle": "Vale do Itajaí — simulador de escoamento",
+  "subtitle": "Vale do Itajaí — Itajaí-Açu e Itajaí-Mirim",
   "river_name": "Rio Itajaí-Açu",
   "target_city_id": "blumenau",
   "surge_city_id": "rio-do-sul",
@@ -30,6 +30,7 @@
       "id": "rio-do-sul",
       "name": "Rio do Sul",
       "role": "headwater",
+      "river_branch_id": "main",
       "lat": -27.214,
       "lon": -49.643,
       "zoom": 12.6,
@@ -46,6 +47,7 @@
       "id": "ibirama",
       "name": "Ibirama",
       "role": "upper_catchment",
+      "river_branch_id": "main",
       "lat": -27.057,
       "lon": -49.518,
       "zoom": 12.8,
@@ -62,6 +64,7 @@
       "id": "apiuna",
       "name": "Apiúna",
       "role": "surge_entry",
+      "river_branch_id": "main",
       "lat": -27.036,
       "lon": -49.39,
       "zoom": 13,
@@ -78,6 +81,7 @@
       "id": "indaial",
       "name": "Indaial",
       "role": "intermediate_crest",
+      "river_branch_id": "main",
       "lat": -26.899,
       "lon": -49.232,
       "zoom": 13,
@@ -94,6 +98,7 @@
       "id": "blumenau",
       "name": "Blumenau",
       "role": "target",
+      "river_branch_id": "main",
       "lat": -26.9194,
       "lon": -49.0661,
       "zoom": 13.1,
@@ -110,6 +115,7 @@
       "id": "gaspar",
       "name": "Gaspar",
       "role": "downstream",
+      "river_branch_id": "main",
       "lat": -26.931,
       "lon": -48.959,
       "zoom": 13,
@@ -126,6 +132,7 @@
       "id": "ilhota",
       "name": "Ilhota",
       "role": "downstream",
+      "river_branch_id": "main",
       "lat": -26.902,
       "lon": -48.828,
       "zoom": 12.9,
@@ -142,6 +149,7 @@
       "id": "itajai",
       "name": "Itajaí",
       "role": "estuary",
+      "river_branch_id": "*",
       "lat": -26.9077,
       "lon": -48.661,
       "zoom": 12.7,
@@ -153,6 +161,57 @@
       "spill_stage_max_m": 8,
       "spill_stage_stops_m": [2.5, 3.5, 4, 5, 6, 8],
       "spill_note": "Estuário (rio + maré) — provisório. A cota de Blumenau não se aplica na foz."
+    },
+    {
+      "id": "botuvera",
+      "name": "Botuverá",
+      "role": "mirim_headwater",
+      "river_branch_id": "itajai-mirim",
+      "lat": -27.199,
+      "lon": -49.074,
+      "zoom": 13,
+      "lag_to_target_h": 4,
+      "blurb": "Alto Itajaí-Mirim — chuva deste braço desce a Brusque, não a Blumenau",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 4,
+      "spill_stage_min_m": 3,
+      "spill_stage_max_m": 8,
+      "spill_stage_stops_m": [3, 4, 5, 6, 8],
+      "spill_note": "Braço do Mirim — provisório. Confirme com a Defesa Civil de Botuverá. Não use a régua de Blumenau."
+    },
+    {
+      "id": "brusque",
+      "name": "Brusque",
+      "role": "mirim_target",
+      "river_branch_id": "itajai-mirim",
+      "lat": -27.0978,
+      "lon": -48.9147,
+      "zoom": 13.1,
+      "lag_to_target_h": 0,
+      "blurb": "Principal cidade do Itajaí-Mirim — cheia paralela à do Açu, não a jusante de Blumenau",
+      "normal_stage_cm": 50,
+      "spill_stage_m": 4.5,
+      "spill_stage_min_m": 3.5,
+      "spill_stage_max_m": 9,
+      "spill_stage_stops_m": [3.5, 4.5, 6, 7.5, 9],
+      "spill_note": "Régua municipal do Mirim — provisório. Confirme com a Defesa Civil de Brusque. Os 8 m de Blumenau não se aplicam."
+    },
+    {
+      "id": "guabiruba",
+      "name": "Guabiruba",
+      "role": "mirim_mid",
+      "river_branch_id": "itajai-mirim",
+      "lat": -27.086,
+      "lon": -48.981,
+      "zoom": 13,
+      "lag_to_target_h": 0,
+      "blurb": "Médio Itajaí-Mirim, entre o Açu e Brusque",
+      "normal_stage_cm": 40,
+      "spill_stage_m": 4,
+      "spill_stage_min_m": 3,
+      "spill_stage_max_m": 8,
+      "spill_stage_stops_m": [3, 4, 5, 6.5, 8],
+      "spill_note": "Braço do Mirim — provisório. Defesa Civil de Guabiruba. Não copie Blumenau."
     }
   ],
   "river_thalweg": [
@@ -170,6 +229,23 @@
     [-48.661, -26.908]
   ],
   "reach_lags_h": [10, 9, 8, 6.5, 5, 3, 2, 1, 0, -2, -3.5],
+  "river_branches": [
+    {
+      "id": "itajai-mirim",
+      "name": "Rio Itajaí-Mirim",
+      "coordinates": [
+        [-49.074, -27.199],
+        [-49.02, -27.16],
+        [-48.97, -27.13],
+        [-48.915, -27.098],
+        [-48.85, -27.05],
+        [-48.78, -27.00],
+        [-48.72, -26.95],
+        [-48.68, -26.91]
+      ],
+      "reach_lags_h": [4, 3, 2, 0, -1, -2, -3.5, -5]
+    }
+  ],
   "gauges": {
     "provider": "ANA HidroWeb / ServiceANA telemetry",
     "endpoint": "https://telemetriaws1.ana.gov.br/ServiceANA.asmx/DadosHidrometeorologicos",
@@ -214,15 +290,15 @@
     "spill_stage_step_m": 0.5,
     "spill_stage_stops_m": [8, 8.5, 10, 12, 14, 16, 17],
     "regua_max_m": 20,
-    "upstream_city_ids": ["rio-do-sul", "ibirama", "apiuna", "indaial"],
+    "upstream_city_ids": ["rio-do-sul", "ibirama", "apiuna", "indaial", "botuvera", "brusque", "guabiruba"],
     "vertical_datum": "EGM96"
   },
   "copy": {
-    "cities_tip": "Eixo do Itajaí-Açu. Ao escolher, o mapa voa e a régua/transbordo passam aos valores iniciais daquela cidade. Pan no mapa atualiza pela cidade mais próxima. Tributários (Itajaí-Mirim, Benedito) ainda não estão no talvegue.",
+    "cities_tip": "Vale do Itajaí = Itajaí-Açu (Rio do Sul → Blumenau → foz) e Itajaí-Mirim (Botuverá → Brusque → foz). Ao escolher, o mapa voa e a régua/transbordo passam aos valores daquela cidade. Pan atualiza pela cidade mais próxima. Cada braço tem o próprio talvegue — a mancha nasce nos dois rios, sem um canal inventado entre Blumenau e Brusque.",
     "reset_tip": "Volta a régua ao nível natural (cota ANA ao vivo, ou o baseline do pacote), zera a chuva simulada e põe a janela no tempo típico Rio do Sul → Blumenau (~10 h). Calibre esse lag com a Defesa Civil.",
-    "spill_note": "Cota por município (Blumenau ~8 m; foz em Itajaí ~4 m — provisório). Segue o dropdown ou a vista do mapa.",
+    "spill_note": "Cota por município (Blumenau ~8 m; Brusque no Mirim ~4,5 m; foz em Itajaí ~4 m — provisório). Segue o dropdown ou a vista do mapa.",
     "target_short": "Blumenau",
     "live_fallback": "sem telemetria — usando baseline de Blumenau",
-    "region_blurb": "O Itajaí-Açu concentra chuva do alto vale (Rio do Sul, Ibirama, Apiúna) na planície de Blumenau e segue a Gaspar, Ilhota e a foz em Itajaí. Pacote provisório: valide estações ANA e cotas antes de operação."
+    "region_blurb": "O Vale do Itajaí, na Defesa Civil, cobre o Itajaí-Açu e o Itajaí-Mirim. A chuva do alto Açu (Rio do Sul, Ibirama, Apiúna) concentra em Blumenau; a do Mirim (Botuverá, Brusque, Guabiruba) desce a Brusque e encontra o Açu só na foz, em Itajaí. Pacote provisório: valide estações ANA e cotas. Brusque ainda sem código HidroWeb confirmado neste JSON."
   }
 }

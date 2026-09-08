@@ -1,4 +1,10 @@
-/** Open-Meteo rain + ANA gauges → lagged flood corridor (region pack). */
+/**
+ * Open-Meteo (chuva horária) × ANA HidroWeb (cota/vazão) → régua prevista e ΔH.
+ * O pacote da bacia (`regions/*.json`) traz coeficientes, talvegue e estações.
+ *
+ * ΔH ≈ chuva_efetiva_mm × rain_runoff_coeff + Q / valley_width_factor.
+ * Chuva efetiva ≠ soma bruta: balde com meia-vida (intervalos secos esvaziam).
+ */
 
 import type { Feature, FeatureCollection } from "geojson";
 import { getRegion, surgeLagH } from "./region";
@@ -77,6 +83,31 @@ export function reachLagsH(): number[] {
   return getRegion().reach_lags_h;
 }
 
+/** Talvegue principal + tributários (LineStrings separados; sem atalho entre vales). */
+export function riverBranches(): {
+  id: string;
+  name: string;
+  coordinates: [number, number][];
+  lags: number[];
+}[] {
+  const pack = getRegion();
+  return [
+    {
+      id: "main",
+      name: pack.river_name,
+      coordinates: pack.river_thalweg,
+      lags: pack.reach_lags_h,
+    },
+    ...pack.river_branches.map((b) => ({
+      id: b.id,
+      name: b.name,
+      coordinates: b.coordinates,
+      lags: b.reach_lags_h,
+    })),
+  ];
+}
+
+/** Subida da régua (m): chuva efetiva × coeff da bacia + vazão diluída na planície. */
 export function stageRiseM(rainMm: number, flowM3s: number): number {
   return Math.max(0, rainMm * rainCoeff() + flowM3s / valleyWidthFactor());
 }
@@ -182,6 +213,7 @@ async function fetchAnaStation(code: string, signal?: AbortSignal): Promise<{
 
 async function fetchOpenMeteo(signal?: AbortSignal): Promise<CityRain[]> {
   const cities = getRegion().cities;
+  // Um request: uma série horária de precipitação por município do pacote (7 dias, fuso SP).
   const latitude = cities.map((c) => c.lat).join(",");
   const longitude = cities.map((c) => c.lon).join(",");
   const url =
@@ -219,6 +251,7 @@ function accumHours(city: CityRain, hours: number): number {
 }
 
 function upstreamRain(rainfall: CityRain[]): CityRain[] {
+  // Média só nas cidades a montante do alvo (ex.: alto Açu + Mirim), não na foz.
   const ids = new Set(getRegion().hydro.upstream_city_ids);
   const upstream = rainfall.filter((r) => ids.has(r.id));
   return upstream.length ? upstream : rainfall;
@@ -237,6 +270,7 @@ export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnap
   const pack = getRegion();
   const rainfall = await fetchOpenMeteo(signal);
   const gauges: GaugeReading[] = [];
+  // Uma leitura ANA por estação do pacote; offline entra no snapshot sem derrubar o resto.
   for (const station of pack.gauges.stations) {
     try {
       const reading = await fetchAnaStation(station.code, signal);
@@ -254,6 +288,7 @@ export async function loadHydroSnapshot(signal?: AbortSignal): Promise<HydroSnap
 
   const live = gauges.filter((g) => g.online && g.flow_m3s != null);
   const targetGauge = gauges.find((g) => g.id === pack.live_gauge_id);
+  // Vazão: última estação online; cota: última com stage_cm (piso da régua em Tempo Real).
   const flow = live.at(-1)?.flow_m3s ?? targetGauge?.flow_m3s ?? 0;
   const stageCm = [...live].reverse().find((g) => g.stage_cm != null)?.stage_cm ?? null;
 
@@ -303,7 +338,12 @@ function offsetPolygon(
   ];
 }
 
-export function rainForHorizon(snapshot: HydroSnapshot | null, hours: number, overrideMm?: number): number {
+/** Média da chuva efetiva a montante na janela (h). Slider 1–7 dias usa forecastHorizonHours. */
+export function rainForHorizon(
+  snapshot: HydroSnapshot | null,
+  hours: number,
+  overrideMm?: number,
+): number {
   if (overrideMm != null && Number.isFinite(overrideMm)) return overrideMm;
   if (!snapshot) return 0;
   const upstream = upstreamRain(snapshot.rainfall);
@@ -317,17 +357,28 @@ export function rainForForecastDays(snapshot: HydroSnapshot | null, days: number
   return rainForHorizon(snapshot, hours);
 }
 
-/** Arithmetic sum of forecast rain (mm), ignoring drainage between storms. */
-export function grossRainForForecastDays(snapshot: HydroSnapshot | null, days: number): number {
+export function grossRainForHorizon(snapshot: HydroSnapshot | null, hours: number): number {
   if (!snapshot) return 0;
-  const hours = forecastHorizonHours(days);
   return meanUpstreamMetric(snapshot, (r) => grossRainMm(r.hourly_mm, hours));
 }
 
-/** Predicted staff (m above bed) after `days` of forecast rain, from current ANA stage. */
-export function forecastStaffM(snapshot: HydroSnapshot | null, days: number): number {
+/** Arithmetic sum of forecast rain (mm), ignoring drainage between storms. */
+export function grossRainForForecastDays(snapshot: HydroSnapshot | null, days: number): number {
+  return grossRainForHorizon(snapshot, forecastHorizonHours(days));
+}
+
+/**
+ * Cota prevista (m acima do leito) = régua atual (ANA ou slider) + ΔH da chuva efetiva.
+ * 32 mm × 0,05 = +1,6 m na régua, não 32 cm de água no mapa.
+ */
+export function forecastStaffM(
+  snapshot: HydroSnapshot | null,
+  days: number,
+  baselineCm?: number,
+): number {
   const rainMm = rainForForecastDays(snapshot, days);
-  const currentM = (snapshot?.gauge_stage_cm ?? getRegion().hydro.normal_stage_cm) / 100;
+  const currentM =
+    (baselineCm ?? snapshot?.gauge_stage_cm ?? getRegion().hydro.normal_stage_cm) / 100;
   return Math.max(0, currentM + rainMm * rainCoeff());
 }
 
@@ -388,42 +439,47 @@ export function todayHorizonLabel(from = new Date()): string {
   return formatWeekdayDatePt(horizonDate(0, from));
 }
 
+/** Buffer ao longo do talvegue (legado/debug): largura ≈ ΔH × ocupação do trecho. */
 export function buildFloodGeoJSON(
   stageRiseMValue: number,
   hour: number,
   uniform = false,
 ): FeatureCollection {
-  const line = riverThalweg();
-  const lags = reachLagsH();
   const features: Feature[] = [];
-  for (let i = 0; i < line.length - 1; i += 1) {
-    const lag = lags[i] ?? 0;
-    const depth = uniform
-      ? stageRiseMValue
-      : stageRiseMValue * riverArrival(hour, lag);
-    if (depth < 0.04) continue;
-    const half = 0.00028 + Math.min(depth, 6) * 0.00115;
-    const depthBand = depth < 0.3 ? "wade" : depth < 1 ? "stall" : "evacuate";
-    features.push({
-      type: "Feature",
-      properties: { depth_m: round2(depth), depth_band: depthBand, lag_h: lag },
-      geometry: { type: "Polygon", coordinates: [offsetPolygon(line[i], line[i + 1], half)] },
-    });
+  for (const branch of riverBranches()) {
+    const line = branch.coordinates;
+    const lags = branch.lags;
+    for (let i = 0; i < line.length - 1; i += 1) {
+      const lag = lags[i] ?? 0;
+      const depth = uniform
+        ? stageRiseMValue
+        : stageRiseMValue * riverArrival(hour, lag);
+      if (depth < 0.04) continue;
+      const half = 0.00028 + Math.min(depth, 6) * 0.00115;
+      const depthBand = depth < 0.3 ? "wade" : depth < 1 ? "stall" : "evacuate";
+      features.push({
+        type: "Feature",
+        properties: {
+          depth_m: round2(depth),
+          depth_band: depthBand,
+          lag_h: lag,
+          river: branch.name,
+        },
+        geometry: { type: "Polygon", coordinates: [offsetPolygon(line[i], line[i + 1], half)] },
+      });
+    }
   }
   return { type: "FeatureCollection", features };
 }
 
 export function riverLineGeoJSON(): FeatureCollection {
-  const pack = getRegion();
   return {
     type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: { name: pack.river_name },
-        geometry: { type: "LineString", coordinates: pack.river_thalweg },
-      },
-    ],
+    features: riverBranches().map((branch) => ({
+      type: "Feature" as const,
+      properties: { name: branch.name, id: branch.id },
+      geometry: { type: "LineString" as const, coordinates: branch.coordinates },
+    })),
   };
 }
 

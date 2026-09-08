@@ -2,7 +2,7 @@
 
 O **Vale Alerta** é uma plataforma web interativa, de código aberto e ultra-leve, desenvolvida para traduzir previsões meteorológicas complexas em informações visuais simples, práticas e acionáveis para o cidadão comum.
 
-Focado inicialmente na bacia do **Vale do Rio Tijucas** (Rancho Queimado, Angelina, Major Gercino, Nova Trento, São João Batista, Canelinha e Tijucas), o motor é **independente de localização**. Novas bacias entram como JSON em `regions/` — o **Vale do Itajaí** já está como segundo pacote (provisório). Veja `CONTRIBUTING.md`.
+Focado inicialmente na bacia do **Vale do Rio Tijucas** (Rancho Queimado, Angelina, Major Gercino, Nova Trento, São João Batista, Canelinha e Tijucas), o motor é **independente de localização**. Novas bacias entram como JSON em `regions/` — o **Vale do Itajaí** já está como segundo pacote (provisório: Itajaí-Açu + Itajaí-Mirim). Veja `CONTRIBUTING.md`.
 
 ---
 
@@ -77,7 +77,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 - Seletor **Bacia**: Tijucas ou Itajaí. **Município do vale**: voa até a cidade e aplica a **régua e o transbordo iniciais daquele município**. Pan/zoom atualizam a cota pela cidade mais próxima da vista (se você já mexeu na régua, ela permanece).
 - Após pan, zoom ou troca de cidade, o app **espera 1 segundo** e recarrega relevo + heatmap para a **área visível** (com ~2 km de folga no grid de inundação para o rio não “sair” da malha).
 - Badge no mapa com o **dia da semana** e se a mancha é Agora ou Previsão; lâmpadas verde/vermelha nos sliders indicam qual camada está viva.
-- Ícones **i** em cada controle: a explicação aparece ao passar o mouse.
+- Botão **Ajuda** no canto superior direito da barra (ao lado do título): abre uma segunda coluna à direita, com uma caixa por controle (mesmo título, empilhadas). Com a ajuda aberta, o bloco e a caixa correspondente ganham borda; o hover destaca o par. Esc fecha.
 
 ### Relevo Copernicus na vista
 
@@ -91,7 +91,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 - Superfície d’água **única na vista**: cota = talvegue amostrado no DEM + régua × ocupação da onda.
 - Preenchimento hidrológico a partir do rio (flood-fill) para células abaixo dessa cota, com folga (~0,55 m) para ruído do DSM.
 - Cores por profundidade **local**: **10, 25, 50, 75, 100 … 250 cm**.
-- Só **uma** mancha por vez: arrastar a régua pinta **Agora**; arrastar os dias Open-Meteo pinta **Previsão**. As duas nunca se sobrepõem.
+- Só **uma** mancha por vez: arrastar a régua pinta **Agora**; arrastar os dias Open-Meteo pinta **Previsão** e **liga Tempo Real**. As duas nunca se sobrepõem.
 - O overlay fica **georreferenciado** na malha do DEM (vista + ~2 km de folga). Pan e zoom acompanham heatmap e relevo. Depois de 1 s parado, os dois são recalculados na vista nova — a mancha não fica cortada no recorte do zoom anterior.
 
 ### Régua do rio e cota de transbordo
@@ -104,9 +104,11 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 ### Previsão de 7 dias (Open-Meteo)
 
+- Caixa **próximas 24 h**: volume bruto e efetivo na janela rolante de 24 h (não é o dia 1 do slider).
 - A semana **começa hoje**: slider 1 = restante de hoje; 7 = até o mesmo dia da semana seguinte menos um.
+- Arrastar o slider **liga Tempo Real**: a régua não pode ficar abaixo da cota ANA, e o heatmap Previsão soma a chuva efetiva sobre essa régua (não sobre um rio “normal” no app).
 - Chuva **efetiva** (não a soma bruta de 7 dias): balde horário com **meia-vida de 12 h**. Intervalos secos esvaziam o balde.
-- Média a montante (Rancho Queimado, Angelina, Major Gercino). Subida: `ΔH = chuva_efetiva_mm × 0,05`. Cota no mapa ≈ cota ANA (ou ~30 cm) + ΔH.
+- Média a montante. Subida: `ΔH = chuva_efetiva_mm × coeficiente da bacia`. Cota no mapa ≈ régua (piso ANA se Tempo Real) + ΔH.
 - A camada Previsão usa as **mesmas cores** de profundidade sobre o DEM da tela.
 
 ### Escala de profundidade (cm e mm/h)
@@ -123,7 +125,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 ### Tempo real (ANA × Open-Meteo)
 
-- Checkbox **Tempo Real**: ligado, mostra a cota ANA e ela vira o **mínimo** da régua (dá para simular acima, não abaixo). Desligado, a régua é livre desde 0.
+- Checkbox **Tempo Real**: fica **acima** da caixa das 24 h e do slider de 7 dias (não no topo da barra). Ligado, mostra a cota ANA e ela vira o **mínimo** da régua (dá para simular acima, não abaixo). Desligado, a régua é livre desde 0. Mover a previsão de chuva liga o checkbox automaticamente.
 - **Resetar para condições normais**: com o checkbox ligado, volta à cota ANA ao vivo (ex.: 2 m se o rio já subiu); desligado, volta ao nível natural do município.
 - Telemetria **ANA HidroWeb** (estações do pacote da bacia) e chuva Open-Meteo.
 

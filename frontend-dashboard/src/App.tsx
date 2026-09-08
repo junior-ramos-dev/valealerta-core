@@ -17,7 +17,9 @@ import {
   cityPointsGeoJSON,
   loadHydroSnapshot,
   rainForForecastDays,
+  rainForHorizon,
   grossRainForForecastDays,
+  grossRainForHorizon,
   rainMmPerHourForInlandCm,
   forecastStaffM,
   floodOccupancy,
@@ -34,6 +36,7 @@ import {
   getRegion,
   loadRegionPack,
   nearestCity,
+  riverBranchIdsForCity,
   setActiveRegion,
   staffForCity,
   storeRegionId,
@@ -63,7 +66,7 @@ import {
   saveLocalPatches,
   type TopoPatchFeature,
 } from "./topoPatches";
-import { InfoTip } from "./InfoTip";
+import { SidebarDock, SidebarSection } from "./SidebarSection";
 import { PatchLoginForm } from "./PatchLoginForm";
 import { dummyLogout, readDummySession } from "./dummyAuth";
 import "./App.css";
@@ -146,6 +149,7 @@ export default function App() {
   >("loading");
   const [topoMeta, setTopoMeta] = useState<string | null>(null);
   const [liveRiver, setLiveRiver] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [hydro, setHydro] = useState<HydroSnapshot | null>(null);
   const [hydroError, setHydroError] = useState<string | null>(null);
   const [waterLevelCm, setWaterLevelCm] = useState(30);
@@ -188,6 +192,7 @@ export default function App() {
   const timeWindowRef = useRef(timeWindow);
   const hydroRef = useRef(hydro);
   const liveRiverRef = useRef(liveRiver);
+  const spillStageMRef = useRef(spillStageM);
 
   const topoOverlayRef = useRef<CopernicusTopoOverlay | null>(null);
 
@@ -274,20 +279,33 @@ export default function App() {
       const map = mapRef.current;
       const dem = demOverride ?? topoOverlayRef.current;
       if (!map?.isStyleLoaded() || !dem) return;
-      const rise =
+      // Agora: régua. Previsão: régua (piso ANA) + chuva efetiva × coeff.
+      const staffM =
         heatmapModeRef.current === "forecast"
-          ? forecastStaffM(hydroRef.current, forecastDaysRef.current)
+          ? forecastStaffM(
+              hydroRef.current,
+              forecastDaysRef.current,
+              waterLevelCmRef.current,
+            )
           : waterLevelCmRef.current / 100;
+      // Só o excesso sobre o transbordo vira lâmina no DEM (evita 5 m ANA = 2 m de rua).
+      const extraAboveSpillM = Math.max(0, staffM - spillStageMRef.current);
+      const branchIds = riverBranchIdsForCity(
+        getRegion(),
+        focusCityIdRef.current,
+      );
+      // Sementes só no braço da cidade; extraAboveSpillM = 0 → sem mancha nas ruas.
       try {
         const image = await renderSpillHeatmap(
           dem.elevations,
           dem.width,
           dem.height,
           dem.bbox,
-          rise,
+          extraAboveSpillM,
           timeWindowRef.current,
           false,
           dem.viewBbox,
+          branchIds,
         );
         if (!mapRef.current) return;
         if (topoOverlayRef.current !== dem) return;
@@ -472,6 +490,7 @@ export default function App() {
             overlay.width,
             overlay.height,
             overlay.bbox,
+            riverBranchIdsForCity(getRegion(), focusCityIdRef.current),
           );
           setThalwegM(Number.isFinite(bed) ? bed : null);
           setProbe((prev) =>
@@ -747,6 +766,10 @@ export default function App() {
   }, [heatmapMode]);
 
   useEffect(() => {
+    spillStageMRef.current = spillStageM;
+  }, [spillStageM]);
+
+  useEffect(() => {
     forecastDaysRef.current = forecastDays;
   }, [forecastDays]);
 
@@ -843,6 +866,17 @@ export default function App() {
   }, [canEditPatches, drawingPatch, drawPoints]);
 
   useEffect(() => {
+    if (!helpOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (drawingRef.current) return;
+      setHelpOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [helpOpen]);
+
+  useEffect(() => {
     if (!drawingPatch || !canEditPatches) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -880,6 +914,9 @@ export default function App() {
     hydro,
     timeWindow,
     heatmapEpoch,
+    liveRiver,
+    spillStageM,
+    focusCityId,
   ]);
 
   useEffect(() => {
@@ -939,8 +976,25 @@ export default function App() {
   const displayFlow = hydro?.gauge_flow_m3s ?? 0;
   const forecastRainMm = rainForForecastDays(hydro, forecastDays);
   const forecastRainGrossMm = grossRainForForecastDays(hydro, forecastDays);
-  const forecastRise = forecastStaffM(hydro, forecastDays);
+  const rain24Mm = rainForHorizon(hydro, 24);
+  const rain24GrossMm = grossRainForHorizon(hydro, 24);
+  const rise24M = rain24Mm * hydroCfg.rain_runoff_coeff;
+  const armLiveFromForecast = () => {
+    liveRiverRef.current = true;
+    setLiveRiver(true);
+    const min = liveStageCm(hydro);
+    if (min != null) {
+      waterLevelCmRef.current = Math.max(waterLevelCmRef.current, min);
+      setWaterLevelCm((w) => Math.max(w, min));
+    }
+    setHeatmapMode("forecast");
+  };
   const displayRise = forecastRainMm * hydroCfg.rain_runoff_coeff;
+  const forecastRise = forecastStaffM(
+    hydro,
+    forecastDays,
+    waterLevelEffectiveCm,
+  );
   const targetOccupancy = floodOccupancy(timeWindow, 0);
   const surge = cities.find((c) => c.id === region.surge_city_id);
   const legendMmhExample = rainMmPerHourForInlandCm(
@@ -953,9 +1007,10 @@ export default function App() {
   const todayLabel = todayHorizonLabel();
   const staffNowM =
     heatmapMode === "forecast" ? forecastRise : waterLevelEffectiveCm / 100;
+  const overbankM = Math.max(0, staffNowM - spillStageM);
   const waterSurfaceM =
     thalwegM != null && Number.isFinite(thalwegM)
-      ? thalwegM + staffNowM * floodOccupancy(timeWindow, 0)
+      ? thalwegM + overbankM * floodOccupancy(timeWindow, 0)
       : null;
   const floodDepthM =
     probe?.zM != null && waterSurfaceM != null
@@ -986,33 +1041,40 @@ export default function App() {
         fontFamily: "sans-serif",
       }}
     >
-      <div
-        style={{
-          width: "350px",
-          flexShrink: 0,
-          background: "#1f1f1f",
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-          borderRight: "1px solid #333",
-          zIndex: 20,
-          isolation: "isolate",
-          pointerEvents: "auto",
-          overflowY: "auto",
-        }}
-      >
-        <div>
-          <h2
-            style={{ color: "#00b4d8", margin: "0 0 5px 0", fontSize: "20px" }}
-          >
-            {region.title}
-          </h2>
-          <p style={{ color: "#aaa", fontSize: "12px", margin: 0 }}>
-            {region.subtitle}
-          </p>
-        </div>
+      <SidebarDock helpOpen={helpOpen}>
+        <SidebarSection
+          id="titulo"
+          title={region.title}
+          help="Esta coluna descreve o controle à esquerda. O botão Ajuda abre e fecha o painel. Esc também fecha. Passe o mouse num bloco ou numa caixa para ver o par correspondente."
+        >
+          <div className="sidebar-title-row">
+            <div>
+              <h2
+                style={{ color: "#00b4d8", margin: "2px 0 5px 0", fontSize: "20px" }}
+              >
+                {region.title}
+              </h2>
+              <p style={{ color: "#aaa", fontSize: "12px", margin: 0 }}>
+                {region.subtitle}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="sidebar-help-btn"
+              aria-expanded={helpOpen}
+              aria-controls="sidebar-help-rail"
+              onClick={() => setHelpOpen((open) => !open)}
+            >
+              {helpOpen ? "Fechar" : "Ajuda"}
+            </button>
+          </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="bacia"
+          title="Bacia"
+          help="Troca o pacote da bacia (cidades, estações ANA, cotas e textos). Cada vale tem calibração própria — não copie cotas de transbordo entre bacias."
+        >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label
             style={{
@@ -1060,7 +1122,22 @@ export default function App() {
             </p>
           )}
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="municipio"
+          title="Município do vale"
+          help={
+            <>
+              <p>{region.copy.cities_tip}</p>
+              <p style={{ marginTop: 8 }}>
+                {liveRiver
+                  ? "Resetar: com Tempo Real ligado, a régua volta à cota ANA ao vivo (o piso atual do rio). Previsão no dia 1 e heatmap Agora."
+                  : "Resetar: com Tempo Real desligado, a régua volta ao nível natural no leito deste município (sem usar a cota ANA). Previsão no dia 1 e heatmap Agora."}
+              </p>
+            </>
+          }
+        >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label
             style={{
@@ -1068,12 +1145,9 @@ export default function App() {
               textTransform: "uppercase",
               color: "#888",
               fontWeight: "bold",
-              display: "flex",
-              alignItems: "center",
             }}
           >
             Município do vale
-            <InfoTip text={region.copy.cities_tip} />
           </label>
           <select
             value={focusCityId}
@@ -1158,52 +1232,15 @@ export default function App() {
             }}
           >
             Resetar para condições normais
-            <InfoTip
-              text={
-                liveRiver
-                  ? "Com Tempo Real ligado, a régua volta à cota ANA ao vivo (o piso atual do rio). Previsão no dia 1 e heatmap Agora."
-                  : "Com Tempo Real desligado, a régua volta ao nível natural no leito deste município (sem usar a cota ANA). Previsão no dia 1 e heatmap Agora."
-              }
-            />
           </button>
         </div>
+        </SidebarSection>
 
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            background: liveRiver ? "rgba(230, 57, 70, 0.12)" : "#2d2d2d",
-            border: liveRiver ? "1px solid #e63946" : "1px solid #333",
-            borderRadius: 6,
-            padding: "8px 10px",
-            cursor: "pointer",
-            fontSize: 13,
-            fontWeight: 700,
-          }}
+        <SidebarSection
+          id="overlay"
+          title="Overlay de relevo (Copernicus)"
+          help="Hillshade do Copernicus DEM GLO-30 (30 m) na área visível. Após mover o mapa ou trocar de cidade, espera 1 s e recarrega relevo + heatmap. O slider só muda a opacidade."
         >
-          <input
-            type="checkbox"
-            checked={liveRiver}
-            onChange={(e) => {
-              const on = e.target.checked;
-              setLiveRiver(on);
-              setHeatmapMode("now");
-              if (on) {
-                const min = liveStageCm(hydro);
-                if (min != null) {
-                  setWaterLevelCm((w) => Math.max(w, min));
-                }
-              }
-            }}
-            style={{ width: 16, height: 16, accentColor: "#e63946", cursor: "pointer" }}
-          />
-          <span>🛰️ Tempo Real</span>
-          <InfoTip text="Ligado: mostra a cota ANA atual e ela vira o mínimo da régua — dá para simular acima, não abaixo. Desligado: a régua vai de 0 até o teto, livre. Resetar segue o mesmo modo." />
-        </label>
-
-        <hr style={{ border: 0, borderTop: "1px solid #333", margin: 0 }} />
-
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <label
             style={{
@@ -1219,7 +1256,6 @@ export default function App() {
             <span style={{ marginLeft: "auto", color: "#00b4d8" }}>
               {topoOpacity}%
             </span>
-            <InfoTip text="Hillshade do Copernicus DEM GLO-30 (30 m) na área visível. Após mover o mapa ou trocar de cidade, espera 1 s e recarrega relevo + heatmap. O slider só muda a opacidade." />
           </label>
           <input
             type="range"
@@ -1244,12 +1280,16 @@ export default function App() {
             {topoStatus === "error" && topoMeta}
           </p>
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="escala"
+          title="Escala de profundidade (cm)"
+          help={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×${hydroCfg.rain_runoff_coeff} + Q/${hydroCfg.valley_width_factor}).`}
+        >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
               fontSize: 11,
               color: "#888",
               fontWeight: "bold",
@@ -1257,9 +1297,6 @@ export default function App() {
             }}
           >
             Escala de profundidade (cm)
-            <InfoTip
-              text={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×${hydroCfg.rain_runoff_coeff} + Q/${hydroCfg.valley_width_factor}).`}
-            />
           </div>
           <div className="depth-scale">
             {DEPTH_SCALE.map((stop) => {
@@ -1300,7 +1337,13 @@ export default function App() {
             {legendMmhExample.toFixed(0)} mm somados em {CRITICAL_RAIN_H} h.
           </p>
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="regua"
+          title="Nível do rio (régua)"
+          help={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. Transbordo de ${cityStaff.city_name}: ${cityStaff.spill_stage_min_m} a ${cityStaff.spill_stage_max_m} m. ${cityStaff.spill_note}`}
+        >
         <div
           style={{
             display: "flex",
@@ -1327,9 +1370,6 @@ export default function App() {
             }}
           >
             🌊 Nível do rio (régua)
-            <InfoTip
-              text={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. Transbordo de ${cityStaff.city_name}: ${cityStaff.spill_stage_min_m} a ${cityStaff.spill_stage_max_m} m. ${cityStaff.spill_note}`}
-            />
             <LayerLamp on={heatmapMode === "now"} liveLabel="agora" />
             <span
               style={{ color: "#00b4d8", width: "100%", textAlign: "right" }}
@@ -1400,7 +1440,82 @@ export default function App() {
             />
           </div>
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="tempo-real"
+          title="Tempo Real"
+          help="Ligado: mostra a cota ANA atual e ela vira o mínimo da régua — dá para simular acima, não abaixo. Desligado: a régua vai de 0 até o teto, livre. Arrastar a previsão de chuva liga este modo sozinho, para a mancha não partir de um rio “normal” se a ANA já estiver um metro acima. Resetar segue o mesmo modo."
+        >
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: liveRiver ? "rgba(230, 57, 70, 0.12)" : "#2d2d2d",
+            border: liveRiver ? "1px solid #e63946" : "1px solid #333",
+            borderRadius: 6,
+            padding: "8px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={liveRiver}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setLiveRiver(on);
+              setHeatmapMode("now");
+              if (on) {
+                const min = liveStageCm(hydro);
+                if (min != null) {
+                  setWaterLevelCm((w) => Math.max(w, min));
+                }
+              }
+            }}
+            style={{ width: 16, height: 16, accentColor: "#e63946", cursor: "pointer" }}
+          />
+          <span>🛰️ Tempo Real</span>
+        </label>
+        </SidebarSection>
+
+        <SidebarSection
+          id="chuva-24h"
+          title="Próximas 24 h"
+          help="Volume previsto nas próximas 24 horas a montante — não é o mesmo que o dia 1 do slider (resto de hoje no fuso de São Paulo). A subida usa chuva efetiva × coeficiente da bacia, sobre a cota da régua. Mover o slider de previsão liga Tempo Real para essa cota não ficar abaixo da ANA."
+        >
+        <p
+          style={{
+            background: "#2a2a2a",
+            padding: "12px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            color: "#ccc",
+            lineHeight: "1.45",
+            borderLeft: "4px solid #7fdbfa",
+            margin: 0,
+          }}
+        >
+          Próximas 24 h (Open-Meteo, janela rolante) · bruto{" "}
+          <b>{rain24GrossMm.toFixed(0)} mm</b> · efetivo{" "}
+          <b>{rain24Mm.toFixed(0)} mm</b> · subida ≈{" "}
+          <b>+{rise24M.toFixed(2)} m</b> sobre a régua atual
+          {liveMinCm != null
+            ? ` (piso ANA ${(liveMinCm / 100).toFixed(2)} m)`
+            : liveRiver
+              ? " (Tempo Real ligado, ANA ainda sem cota)"
+              : ""}
+          .
+        </p>
+        </SidebarSection>
+
+        <SidebarSection
+          id="acumulo"
+          title="Acúmulo previsto (Open-Meteo)"
+          help={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar liga Tempo Real e pinta o heatmap Previsão. A chuva efetiva (mm) sobe a régua em mm × ${hydroCfg.rain_runoff_coeff} — 32 mm ≈ +1,6 m na cota, não 32 cm nem 2 m de rua. A mancha só aparece quando a cota prevista passa do transbordo deste município. Sem a cota ao vivo, a mancha pode parecer leve se o rio já estiver cheio. Meia-vida do balde: ${hydroCfg.rain_storage_halflife_h} h.`}
+        >
         <div
           style={{
             display: "flex",
@@ -1431,7 +1546,6 @@ export default function App() {
             }}
           >
             🌧️ Acúmulo previsto (Open-Meteo)
-            <InfoTip text={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar este slider coloca no mapa só o heatmap Previsão. A chuva efetiva usa um balde com meia-vida de ${hydroCfg.rain_storage_halflife_h} h.`} />
             <LayerLamp on={heatmapMode === "forecast"} liveLabel="previsão" />
             <span
               style={{
@@ -1457,8 +1571,8 @@ export default function App() {
               }}
             >
               {forecastDays === 1
-                ? `hoje · ${forecastRainMm.toFixed(0)} mm efetivos`
-                : `hoje → ${forecastDays}º dia · ${forecastRainMm.toFixed(0)} mm efetivos`}
+                ? `hoje · ${forecastRainMm.toFixed(0)} mm efetivos → +${displayRise.toFixed(2)} m na régua`
+                : `hoje → ${forecastDays}º dia · ${forecastRainMm.toFixed(0)} mm efetivos → +${displayRise.toFixed(2)} m na régua`}
             </span>
           </label>
           <input
@@ -1467,20 +1581,31 @@ export default function App() {
             max="7"
             step="1"
             value={forecastDays}
-            onPointerDown={() => setHeatmapMode("forecast")}
+            onPointerDown={() => armLiveFromForecast()}
             onChange={(e) => {
-              setHeatmapMode("forecast");
+              armLiveFromForecast();
               setForecastDays(Number(e.target.value));
             }}
             style={{ width: "100%", cursor: "pointer" }}
           />
-          <p style={{ margin: 0, fontSize: 11, color: "#888" }}>
+          <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.45 }}>
             Bruto {forecastRainGrossMm.toFixed(0)} mm · efetivo{" "}
-            {forecastRainMm.toFixed(0)} mm · subida +{displayRise.toFixed(2)} m
-            · cota {forecastRise.toFixed(2)} m
+            {forecastRainMm.toFixed(0)} mm → subida +{displayRise.toFixed(2)} m
+            na régua (não são {forecastRainMm.toFixed(0)} cm de lâmina). Cota{" "}
+            {forecastRise.toFixed(2)} m
+            {forecastRise >= spillStageM
+              ? ` · ${overbankM.toFixed(2)} m fora da calha (transbordo ${spillStageM.toFixed(1)} m)`
+              : ` · ainda na calha (sai em ${spillStageM.toFixed(1)} m) — a mancha só pinta rua acima do transbordo`}
+            .
           </p>
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="janela"
+          title="Janela de escape"
+          help={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: ${surge?.name ?? "montante"} em ~${surgeLagH(region)} h) e depois a água volta ao leito em cerca de ${hydroCfg.overbank_drain_h} h. Em ${region.copy.target_short}, +${timeWindow} h deixa cerca de ${Math.round(targetOccupancy * 100)}% da lâmina de pico ainda na planície.`}
+        >
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <label
             style={{
@@ -1493,9 +1618,6 @@ export default function App() {
             }}
           >
             ⏱️ Janela de escape
-            <InfoTip
-              text={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: ${surge?.name ?? "montante"} em ~${surgeLagH(region)} h) e depois a água volta ao leito em cerca de ${hydroCfg.overbank_drain_h} h. Em ${region.copy.target_short}, +${timeWindow} h deixa cerca de ${Math.round(targetOccupancy * 100)}% da lâmina de pico ainda na planície.`}
-            />
             <span style={{ marginLeft: "auto", color: "#00b4d8" }}>
               +{timeWindow}h · {Math.round(targetOccupancy * 100)}%
             </span>
@@ -1515,7 +1637,13 @@ export default function App() {
             depois do pico.
           </p>
         </div>
+        </SidebarSection>
 
+        <SidebarSection
+          id="delta-h"
+          title="ΔH chuva efetiva"
+          help={`Subida pela chuva efetiva (não a soma bruta): mm do balde × ${hydroCfg.rain_runoff_coeff}. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps.`}
+        >
         <div
           style={{ display: "flex", flexDirection: "column", gap: "20px" }}
         >
@@ -1529,16 +1657,10 @@ export default function App() {
               lineHeight: "1.4",
               borderLeft: "4px solid #00b4d8",
               margin: 0,
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 6,
             }}
           >
-            <span>
-              ΔH chuva efetiva (Open-Meteo {forecastDays}d) ≈{" "}
-              <b>{displayRise.toFixed(2)} m</b>
-            </span>
-            <InfoTip text={`Subida pela chuva efetiva (não a soma bruta): mm do balde × ${hydroCfg.rain_runoff_coeff}. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps.`} />
+            ΔH chuva efetiva (Open-Meteo {forecastDays}d) ≈{" "}
+            <b>{displayRise.toFixed(2)} m</b>
           </p>
           {hydro && (
             <p
@@ -1561,8 +1683,14 @@ export default function App() {
             </p>
           )}
         </div>
+        </SidebarSection>
 
         {liveRiver && (
+          <SidebarSection
+            id="agora-no-rio"
+            title="Agora no rio"
+            help="Telemetria ANA HidroWeb das estações do pacote. Offline usa o fallback da bacia. A cota ao vivo é o piso da régua."
+          >
           <div style={{ fontSize: "12px", color: "#bbb", lineHeight: "1.45" }}>
             {hydroError && <p style={{ color: "#e63946" }}>{hydroError}</p>}
             {!hydro && !hydroError && (
@@ -1591,8 +1719,14 @@ export default function App() {
               </>
             )}
           </div>
+          </SidebarSection>
         )}
 
+        <SidebarSection
+          id="correcao-relevo"
+          title="Correção de relevo (aterro)"
+          help="O Copernicus não vê obra recente. Só contas autorizadas demarcam o polígono e o Δz. Login dummy até existir autenticação de verdade (usuário usuario). Se uma revisão futura do GLO-30 já incluir a obra, o Vale Alerta compara a cota atual com a cota gravada na criação e deixa de somar o patch (absorvido). Δz pequeno perto do ruído de 2–4 m do DEM pede conferência manual."
+        >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label
             style={{
@@ -1606,7 +1740,6 @@ export default function App() {
             }}
           >
             Correção de relevo (aterro)
-            <InfoTip text="O Copernicus não vê obra recente. Só contas autorizadas demarcam o polígono e o Δz. Se uma revisão futura do GLO-30 já incluir a obra, o Vale Alerta compara a cota atual com a cota gravada na criação e deixa de somar o patch (absorvido). Δz pequeno perto do ruído de 2–4 m do DEM pede conferência manual." />
             {canEditPatches && (
               <button
                 type="button"
@@ -1975,7 +2108,8 @@ export default function App() {
             </>
           )}
         </div>
-      </div>
+        </SidebarSection>
+      </SidebarDock>
 
       <div
         style={{ flex: 1, position: "relative", width: "100%", height: "100%" }}
@@ -1988,8 +2122,12 @@ export default function App() {
             </span>
             <span className="map-layer-flag-meta">
               {heatmapMode === "now"
-                ? `Agora · +${timeWindow}h`
-                : `Previsão · até ${forecastDayLabel} · +${timeWindow}h`}
+                ? overbankM > 0
+                  ? `Agora · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
+                  : `Agora · na calha · +${timeWindow}h`
+                : overbankM > 0
+                  ? `Previsão · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
+                  : `Previsão · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`}
             </span>
           </span>
         </div>

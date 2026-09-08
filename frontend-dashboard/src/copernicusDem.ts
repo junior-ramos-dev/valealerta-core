@@ -1,3 +1,8 @@
+/**
+ * Copernicus DEM GLO-30 (COG 1° no S3): mosaico da vista, hillshade e malha z
+ * usada no heatmap. Coordenadas do overlay = bbox do grid (não o viewport),
+ * senão a mancha cola na tela no pan. Folga FLOOD_PAD_M para o rio não sair da malha.
+ */
 import { fromUrl, type GeoTIFF } from "geotiff";
 import type { TopoPatchFeature } from "./topoPatches";
 import {
@@ -81,6 +86,7 @@ export function bboxFromViewport(map: {
   });
 }
 
+/** Expande o bbox em metros (lat/lon ≈ 111,32 km/°; lon corrigido pelo cos da latitude). */
 export function expandBboxMeters(bbox: LonLatBBox, meters: number): LonLatBBox {
   const lat = (bbox.north + bbox.south) / 2;
   const dLat = meters / 111_320;
@@ -128,6 +134,7 @@ function cropImageData(
   return out;
 }
 
+/** z no ponto: interpolação bilinear na malha (sonda do cursor / WSE vs terreno). */
 export function sampleElevationM(
   overlay: CopernicusTopoOverlay,
   lon: number,
@@ -158,6 +165,7 @@ export function sampleElevationM(
   return z00 * (1 - tx) * (1 - ty) + z10 * tx * (1 - ty) + z01 * (1 - tx) * ty + z11 * tx * ty;
 }
 
+/** Chave do COG público 1°×1° (ex.: S27_W049). */
 function cogKey(south: number, west: number): string {
   const ns = south < 0 ? `S${pad(Math.abs(south), 2)}` : `N${pad(south, 2)}`;
   const ew = west < 0 ? `W${pad(Math.abs(west), 3)}` : `E${pad(west, 3)}`;
@@ -220,6 +228,10 @@ function isNoData(value: number): boolean {
   return !Number.isFinite(value) || value < -1000 || value > 9000;
 }
 
+/**
+ * Hillshade tipo GDAL: gradiente local em metros, sol a 45° / azimute 315°.
+ * DSM (copa/telhado) entra no z — aterro recente não aparece até o GLO-30 atualizar.
+ */
 function renderHillshade(
   elevations: ArrayLike<number>,
   width: number,
@@ -354,6 +366,7 @@ export async function loadCopernicusTopoOverlay(
   patches: TopoPatchFeature[] = [],
 ): Promise<CopernicusTopoOverlay> {
   const view = normalizeBbox(viewBbox);
+  // Malha maior que o viewport (~2 km) para o flood-fill não cortar o rio na borda.
   const work = expandBboxMeters(view, FLOOD_PAD_M);
   const tiles = tilesForBbox(work).slice(0, MAX_TILES);
   const { width, height } = canvasSize(work);
@@ -374,6 +387,7 @@ export async function loadCopernicusTopoOverlay(
 
   const rawElevations = new Float32Array(elevations);
   const patchChecks: PatchDemCheck[] = [];
+  // Cruza cada polígono com o GLO-30 cru: absorvido não soma Δz de novo.
   for (const feature of patches) {
     const z = meanElevationInPatch(rawElevations, width, height, work, feature);
     if (z == null) continue;

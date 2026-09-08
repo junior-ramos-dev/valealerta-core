@@ -1,4 +1,7 @@
-/** Local DEM corrections (aterro, corte) applied on top of Copernicus GLO-30. */
+/**
+ * Correções locais do DEM (aterro, corte) sobre o Copernicus GLO-30.
+ * z_usado = z_GLO-30 + Δz só onde o polígono cobre a célula e o patch não foi absorvido.
+ */
 
 import type { Feature, FeatureCollection, Polygon } from "geojson";
 import type { LonLatBBox } from "./copernicusDem";
@@ -239,6 +242,7 @@ function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
 }
 
 export function elevationDeltaM(lon: number, lat: number, patches: TopoPatchFeature[]): number {
+  // Soma Δz de todos os polígonos que cobrem o ponto (aterros sobrepostos).
   let delta = 0;
   for (const feature of patches) {
     const ring = feature.geometry.coordinates[0];
@@ -279,6 +283,7 @@ export function demAbsorbToleranceM(deltaM: number): number {
   return Math.max(1.2, 0.35 * Math.abs(deltaM));
 }
 
+/** Média do GLO-30 cru dentro do polígono — baseline para saber se o DEM já “comeu” o aterro. */
 export function meanElevationInPatch(
   elevations: Float32Array,
   width: number,
@@ -312,6 +317,10 @@ export function meanElevationInPatch(
   return n > 0 ? sum / n : null;
 }
 
+/**
+ * Compara z atual vs z gravado na criação.
+ * Absorvido: o DEM subiu ~Δz (não somar de novo). Review: o terreno mudou de outro jeito.
+ */
 export function assessPatchAgainstDem(
   feature: TopoPatchFeature,
   currentZ: number,
@@ -336,6 +345,7 @@ export function assessPatchAgainstDem(
   };
 }
 
+/** Patches ainda ativos: absorvidos saem; force_active ignora o GLO-30. */
 export function patchesToApply(
   patches: TopoPatchFeature[],
   checks: PatchDemCheck[] = [],
@@ -386,6 +396,7 @@ export function applyPatchesToElevations(
   bbox: LonLatBBox,
   patches: TopoPatchFeature[],
 ): number {
+  // z_usado = z_Copernicus + Δz só nas células cujo centro cai no polígono.
   if (!patches.length) return 0;
   const lonSpan = bbox.east - bbox.west;
   const latSpan = bbox.north - bbox.south;

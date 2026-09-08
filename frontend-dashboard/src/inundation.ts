@@ -1,5 +1,13 @@
+/**
+ * Heatmap de inundação no cliente.
+ *
+ * Profundidade = WSE − z_Copernicus. O WSE não é a régua inteira sobre o DEM
+ * (o canal no GLO-30 é raso): só a lâmina *acima do transbordo municipal*
+ * (extraAboveSpillM) é espalhada a partir do talvegue.
+ * A água só se propaga por células ligadas ao rio (flood-fill), não por lagos isolados.
+ */
 import { type LonLatBBox } from "./copernicusDem";
-import { floodOccupancy, reachLagsH, riverThalweg } from "./hydro";
+import { floodOccupancy, riverBranches } from "./hydro";
 
 export const DEPTH_SCALE: { cm: number; color: string; rgba: [number, number, number, number] }[] = [
   { cm: 10, color: "#D6F6FF", rgba: [214, 246, 255, 120] },
@@ -19,6 +27,7 @@ function isNoData(value: number): boolean {
   return !Number.isFinite(value) || value < -1000 || value > 9000;
 }
 
+/** Faixa da legenda: o maior stop com cm ≤ profundidade (ex.: 190 cm usa o stop 175). */
 export function depthScaleStop(
   depthM: number,
 ): (typeof DEPTH_SCALE)[number] | null {
@@ -45,8 +54,7 @@ function percentile(values: number[], p: number): number {
   return sorted[lo] * (1 - (idx - lo)) + sorted[hi] * (idx - lo);
 }
 
-function lagAt(vertex: number): number {
-  const lags = reachLagsH();
+function lagAt(lags: number[], vertex: number): number {
   return lags[Math.min(Math.max(vertex, 0), lags.length - 1)] ?? 0;
 }
 
@@ -63,6 +71,7 @@ function toPixel(
   };
 }
 
+/** Cohen–Sutherland em 2D: recorta o segmento do rio ao bbox do DEM. */
 function clipSegmentToBbox(
   a: [number, number],
   b: [number, number],
@@ -98,6 +107,7 @@ function clipSegmentToBbox(
   ];
 }
 
+/** Raio do carimbo do rio em pixels ≈ 60 m no terreno (semente do flood-fill). */
 function stampRadiusPx(bbox: LonLatBBox, width: number): number {
   const lat = ((bbox.north + bbox.south) / 2) * (Math.PI / 180);
   const mPerPx =
@@ -105,10 +115,16 @@ function stampRadiusPx(bbox: LonLatBBox, width: number): number {
   return Math.max(2, Math.min(16, Math.ceil(60 / Math.max(mPerPx, 1))));
 }
 
+/**
+ * Rasteriza cada LineString do pacote na malha do DEM.
+ * `branchIds` limita ao braço da cidade em foco (Açu vs Mirim) para um WSE
+ * não inundar o outro vale. Sem filtro, todos os leitos viram semente.
+ */
 function rasterizeRiver(
   width: number,
   height: number,
   bbox: LonLatBBox,
+  branchIds?: string[],
 ): { x: number; y: number; i: number; lag: number }[] {
   const radius = stampRadiusPx(bbox, width);
   const seeds: { x: number; y: number; i: number; lag: number }[] = [];
@@ -130,18 +146,22 @@ function rasterizeRiver(
     }
   };
 
-  const line = riverThalweg();
-  for (let s = 0; s < line.length - 1; s += 1) {
-    const clipped = clipSegmentToBbox(line[s], line[s + 1], bbox);
-    if (!clipped) continue;
-    const a = toPixel(clipped[0][0], clipped[0][1], bbox, width, height);
-    const b = toPixel(clipped[1][0], clipped[1][1], bbox, width, height);
-    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
-    const lag0 = lagAt(s);
-    const lag1 = lagAt(s + 1);
-    for (let k = 0; k <= steps; k += 1) {
-      const t = k / steps;
-      stamp(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, lag0 + (lag1 - lag0) * t);
+  for (const branch of riverBranches()) {
+    if (branchIds?.length && !branchIds.includes(branch.id)) continue;
+    const line = branch.coordinates;
+    const lags = branch.lags;
+    for (let s = 0; s < line.length - 1; s += 1) {
+      const clipped = clipSegmentToBbox(line[s], line[s + 1], bbox);
+      if (!clipped) continue;
+      const a = toPixel(clipped[0][0], clipped[0][1], bbox, width, height);
+      const b = toPixel(clipped[1][0], clipped[1][1], bbox, width, height);
+      const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
+      const lag0 = lagAt(lags, s);
+      const lag1 = lagAt(lags, s + 1);
+      for (let k = 0; k <= steps; k += 1) {
+        const t = k / steps;
+        stamp(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, lag0 + (lag1 - lag0) * t);
+      }
     }
   }
   return seeds;
@@ -150,21 +170,26 @@ function rasterizeRiver(
 /** DSM noise / 30 m spikes: water may pass, but only cells below WSE are painted. */
 const CONNECT_SLACK_M = 0.55;
 
-function nearestRiverLag(lon: number, lat: number): number {
-  const line = riverThalweg();
-  const lags = reachLagsH();
-  let best = lags[0] ?? 0;
+/** Lag do vértice de rio mais próximo do centro da vista (onda local). */
+function nearestRiverLag(lon: number, lat: number, branchIds?: string[]): number {
+  let best = 0;
   let bestD = Infinity;
-  for (let i = 0; i < line.length; i += 1) {
-    const d = Math.hypot(line[i][0] - lon, line[i][1] - lat);
-    if (d < bestD) {
-      bestD = d;
-      best = lagAt(i);
+  for (const branch of riverBranches()) {
+    if (branchIds?.length && !branchIds.includes(branch.id)) continue;
+    const line = branch.coordinates;
+    const lags = branch.lags;
+    for (let i = 0; i < line.length; i += 1) {
+      const d = Math.hypot(line[i][0] - lon, line[i][1] - lat);
+      if (d < bestD) {
+        bestD = d;
+        best = lagAt(lags, i);
+      }
     }
   }
   return best;
 }
 
+/** Cota do leito ≈ percentil 10 das células-semente (ignora margens altas no DSM). */
 function channelThalwegM(
   elevations: Float32Array,
   seeds: { i: number }[],
@@ -182,10 +207,17 @@ export function estimateChannelThalwegM(
   width: number,
   height: number,
   bbox: LonLatBBox,
+  branchIds?: string[],
 ): number {
-  return channelThalwegM(elevations, rasterizeRiver(width, height, bbox));
+  return channelThalwegM(elevations, rasterizeRiver(width, height, bbox, branchIds));
 }
 
+/**
+ * Pinta a mancha.
+ * extraAboveSpillM = max(0, régua − transbordo), em metros: zero = rio na calha.
+ * WSE = talvegue_DEM + extra × ocupação da janela de escape (recuo ao leito).
+ * CONNECT_SLACK deixa a água passar ruído de ~0,55 m do DSM sem pintar teto/copa.
+ */
 export async function renderSpillHeatmap(
   elevations: Float32Array,
   width: number,
@@ -195,6 +227,7 @@ export async function renderSpillHeatmap(
   hour: number,
   uniform = false,
   viewBbox?: LonLatBBox,
+  branchIds?: string[],
 ): Promise<HTMLCanvasElement> {
   const n = width * height;
   const assigned = new Float32Array(n);
@@ -202,7 +235,7 @@ export async function renderSpillHeatmap(
   const reached = new Uint8Array(n);
   const queue: number[] = [];
   let qHead = 0;
-  const seeds = rasterizeRiver(width, height, bbox);
+  const seeds = rasterizeRiver(width, height, bbox, branchIds);
   const thalweg = channelThalwegM(elevations, seeds);
 
   const canvas = document.createElement("canvas");
@@ -215,7 +248,8 @@ export async function renderSpillHeatmap(
   const view = viewBbox ?? bbox;
   const occ = uniform
     ? 1
-    : floodOccupancy(hour, nearestRiverLag((view.west + view.east) / 2, (view.south + view.north) / 2));
+    : floodOccupancy(hour, nearestRiverLag((view.west + view.east) / 2, (view.south + view.north) / 2, branchIds));
+  // Lâmina de rua, não a cota da régua: 5 m ANA com transbordo 8 m → extra 0 → sem mancha.
   const wse = thalweg + Math.max(0, extraAboveSpillM) * occ;
 
   const canPass = (z: number) => z < wse + CONNECT_SLACK_M;
@@ -251,7 +285,7 @@ export async function renderSpillHeatmap(
     const wse = assigned[i];
     const z = elevations[i];
     if (!Number.isFinite(wse) || isNoData(z)) continue;
-    const depth = wse - z;
+    const depth = wse - z; // metros de água no pixel = superfície − terreno
     const [r, g, b, a] = colorForDepthM(depth);
     if (a === 0) continue;
     const o = i * 4;
