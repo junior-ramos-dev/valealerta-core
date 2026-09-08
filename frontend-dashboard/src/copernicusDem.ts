@@ -1,4 +1,12 @@
 import { fromUrl, type GeoTIFF } from "geotiff";
+import type { TopoPatchFeature } from "./topoPatches";
+import {
+  applyPatchesToElevations,
+  assessPatchAgainstDem,
+  meanElevationInPatch,
+  patchesToApply,
+  type PatchDemCheck,
+} from "./topoPatches";
 
 export type LonLatBBox = {
   west: number;
@@ -8,11 +16,12 @@ export type LonLatBBox = {
 };
 
 export type CopernicusTopoOverlay = {
-  image: ImageBitmap;
+  image: HTMLCanvasElement;
   elevations: Float32Array;
   width: number;
   height: number;
   bbox: LonLatBBox;
+  viewBbox: LonLatBBox;
   coordinates: [
     [number, number],
     [number, number],
@@ -23,10 +32,14 @@ export type CopernicusTopoOverlay = {
   tileCount: number;
   elevationMinM: number;
   elevationMaxM: number;
+  rawElevations: Float32Array;
+  patchChecks: PatchDemCheck[];
 };
 
 const MAX_CANVAS = 768;
 const MAX_TILES = 16;
+/** Keep the river inside the flood grid when the camera is tight on a neighborhood. */
+const FLOOD_PAD_M = 2000;
 const TIFF_CACHE = new Map<string, Promise<GeoTIFF | null>>();
 
 function pad(value: number, size: number): string {
@@ -74,6 +87,83 @@ export function bboxFromViewport(map: {
     east: b.getEast(),
     north: b.getNorth(),
   });
+}
+
+export function expandBboxMeters(bbox: LonLatBBox, meters: number): LonLatBBox {
+  const lat = (bbox.north + bbox.south) / 2;
+  const dLat = meters / 111_320;
+  const dLon = meters / (111_320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  return normalizeBbox({
+    west: bbox.west - dLon,
+    east: bbox.east + dLon,
+    south: bbox.south - dLat,
+    north: bbox.north + dLat,
+  });
+}
+
+export function viewCropRect(
+  work: LonLatBBox,
+  view: LonLatBBox,
+  width: number,
+  height: number,
+): { x0: number; y0: number; cw: number; ch: number } {
+  const lonSpan = Math.max(work.east - work.west, 1e-9);
+  const latSpan = Math.max(work.north - work.south, 1e-9);
+  const x0 = Math.max(0, Math.floor(((view.west - work.west) / lonSpan) * width));
+  const x1 = Math.min(width, Math.ceil(((view.east - work.west) / lonSpan) * width));
+  const y0 = Math.max(0, Math.floor(((work.north - view.north) / latSpan) * height));
+  const y1 = Math.min(height, Math.ceil(((work.north - view.south) / latSpan) * height));
+  return {
+    x0,
+    y0,
+    cw: Math.max(1, x1 - x0),
+    ch: Math.max(1, y1 - y0),
+  };
+}
+
+function cropImageData(
+  src: ImageData,
+  x0: number,
+  y0: number,
+  cw: number,
+  ch: number,
+): ImageData {
+  const out = new ImageData(cw, ch);
+  for (let y = 0; y < ch; y += 1) {
+    const srcOff = ((y0 + y) * src.width + x0) * 4;
+    out.data.set(src.data.subarray(srcOff, srcOff + cw * 4), y * cw * 4);
+  }
+  return out;
+}
+
+export function sampleElevationM(
+  overlay: CopernicusTopoOverlay,
+  lon: number,
+  lat: number,
+): number | null {
+  const { bbox, width, height, elevations } = overlay;
+  const lonSpan = bbox.east - bbox.west;
+  const latSpan = bbox.north - bbox.south;
+  if (lonSpan <= 1e-12 || latSpan <= 1e-12) return null;
+  const x = ((lon - bbox.west) / lonSpan) * (width - 1);
+  const y = ((bbox.north - lat) / latSpan) * (height - 1);
+  if (x < 0 || y < 0 || x > width - 1 || y > height - 1) return null;
+
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  const at = (cx: number, cy: number) => elevations[cy * width + cx];
+  const z00 = at(x0, y0);
+  const z10 = at(x1, y0);
+  const z01 = at(x0, y1);
+  const z11 = at(x1, y1);
+  const valid = [z00, z10, z01, z11].filter((z) => Number.isFinite(z) && z > -1000 && z < 9000);
+  if (!valid.length) return null;
+  if (valid.length < 4) return valid.reduce((a, b) => a + b, 0) / valid.length;
+  return z00 * (1 - tx) * (1 - ty) + z10 * tx * (1 - ty) + z01 * (1 - tx) * ty + z11 * tx * ty;
 }
 
 function cogKey(south: number, west: number): string {
@@ -239,11 +329,12 @@ async function blitTile(
   try {
     const rasters = await tiff.readRasters({
       bbox: [slice.west, slice.south, slice.east, slice.north],
-      width: tw,
-      height: th,
-      samples: [0],
-      interleave: true,
-      signal,
+        width: tw,
+        height: th,
+        samples: [0],
+        interleave: true,
+        resampleMethod: "bilinear",
+        signal,
     });
     const band = rasters as unknown as ArrayLike<number>;
     for (let y = 0; y < th; y += 1) {
@@ -257,27 +348,29 @@ async function blitTile(
   }
 }
 
-function canvasToBitmap(imageData: ImageData): Promise<ImageBitmap> {
+function imageDataToCanvas(imageData: ImageData): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = imageData.width;
   canvas.height = imageData.height;
   canvas.getContext("2d")?.putImageData(imageData, 0, 0);
-  return createImageBitmap(canvas);
+  return canvas;
 }
 
 export async function loadCopernicusTopoOverlay(
   viewBbox: LonLatBBox,
   signal?: AbortSignal,
+  patches: TopoPatchFeature[] = [],
 ): Promise<CopernicusTopoOverlay> {
   const view = normalizeBbox(viewBbox);
-  const tiles = tilesForBbox(view).slice(0, MAX_TILES);
-  const { width, height } = canvasSize(view);
+  const work = expandBboxMeters(view, FLOOD_PAD_M);
+  const tiles = tilesForBbox(work).slice(0, MAX_TILES);
+  const { width, height } = canvasSize(work);
   const elevations = new Float32Array(width * height);
   elevations.fill(Number.NaN);
 
   const results = await Promise.all(
     tiles.map((tile) =>
-      blitTile(elevations, width, height, view, tile.south, tile.west, signal),
+      blitTile(elevations, width, height, work, tile.south, tile.west, signal),
     ),
   );
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -287,7 +380,24 @@ export async function loadCopernicusTopoOverlay(
     throw new Error("No Copernicus GLO-30 tiles available for this view.");
   }
 
-  const imageData = renderHillshade(elevations, width, height, view);
+  const rawElevations = new Float32Array(elevations);
+  const patchChecks: PatchDemCheck[] = [];
+  for (const feature of patches) {
+    const z = meanElevationInPatch(rawElevations, width, height, work, feature);
+    if (z == null) continue;
+    patchChecks.push(assessPatchAgainstDem(feature, z));
+  }
+  applyPatchesToElevations(
+    elevations,
+    width,
+    height,
+    work,
+    patchesToApply(patches, patchChecks),
+  );
+
+  const hillshade = renderHillshade(elevations, width, height, work);
+  const crop = viewCropRect(work, view, width, height);
+  const imageData = cropImageData(hillshade, crop.x0, crop.y0, crop.cw, crop.ch);
 
   let elevationMinM = Infinity;
   let elevationMaxM = -Infinity;
@@ -299,11 +409,12 @@ export async function loadCopernicusTopoOverlay(
   }
 
   return {
-    image: await canvasToBitmap(imageData),
+    image: imageDataToCanvas(imageData),
     elevations,
     width,
     height,
-    bbox: view,
+    bbox: work,
+    viewBbox: view,
     coordinates: [
       [view.west, view.north],
       [view.east, view.north],
@@ -314,5 +425,7 @@ export async function loadCopernicusTopoOverlay(
     tileCount,
     elevationMinM,
     elevationMaxM,
+    rawElevations,
+    patchChecks,
   };
 }
