@@ -208,6 +208,17 @@ Este é um ecossistema construído pela comunidade para a proteção da comunida
 
 ---
 
+## 🤖 Desenvolvimento com apoio de IAs
+
+O Vale Alerta foi construído em conjunto com assistentes de inteligência artificial, sempre com revisão humana das decisões de produto, hidrologia e código.
+
+* **Gemini:** estudo de viabilidade — quais fontes públicas (Open-Meteo, ANA HidroWeb, Copernicus DEM, Sentinel-1) são acessíveis sem custo, quais limitações de CORS/API existem, e **protótipos iniciais** da ideia (mapa, régua, pipeline de dados).
+* **Cursor:** a **implementação atual** do repositório (dashboard MapLibre, heatmap de profundidade no DEM, hidrologia no cliente, schema PostGIS e este README).
+
+As IAs aceleram pesquisa e iteração; a responsabilidade pelo que entra no mapa e na fórmula de subida d’água permanece com quem mantém o projeto.
+
+---
+
 ## 📄 Licença
 
 Este projeto está sob a licença MIT — sinta-se livre para usar, modificar, distribuir e adaptar para proteger as vidas e o patrimônio dos cidadãos da sua região.
