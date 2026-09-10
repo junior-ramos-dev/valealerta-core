@@ -1,10 +1,10 @@
 # Vale Alerta como PWA
 
-O motor de inundação (régua − DEM → heatmap) **já roda no celular**. A PWA existe para o app **abrir sem torre** e para não precisar baixar de novo o que já esteve no aparelho. Não há “ANA ao vivo” nem previsão nova sem internet.
+O motor de inundação (régua − DEM → heatmap) **já roda no navegador** (telefone ou computador). A PWA existe para o app **abrir sem torre** e para não precisar baixar de novo o que já esteve no aparelho. Não há “ANA ao vivo” nem previsão nova sem internet.
 
-O ícone na tela inicial exige **HTTPS** (produção) ou **`localhost`** (desenvolvimento com o build). O `npm run dev` não registra o service worker.
+O ícone (tela inicial, Dock ou janela própria) exige **HTTPS** (produção) ou **`localhost`** (desenvolvimento com o build). O `npm run dev` não registra o service worker.
 
-Antes de uma cheia, com internet: abra o vale que interessa e toque **Baixar esta bacia para o celular**. Sem esse passo, o app instalado é sobretudo o casco (JS/CSS e pacotes JSON); o heatmap some onde o Copernicus ainda não foi gravado.
+Antes de uma cheia, com internet: abra o vale que interessa (aba **Simulação**) e toque **Baixar bacia para o dispositivo**. Sem esse passo, o app instalado é sobretudo o casco (JS/CSS e pacotes JSON); o heatmap some onde o Copernicus ainda não foi gravado.
 
 Passo a passo de instalação: [desenvolvimento](#instalação-em-desenvolvimento) e [produção](#instalação-em-produção).
 
@@ -22,11 +22,11 @@ Com rede, o comportamento é o do dashboard “ao vivo”:
 | Retrato hidrológico | Cada leitura boa é gravada no IndexedDB com `fetched_at` (por bacia). |
 | Copernicus DEM | COGs 1° da **vista** (proxy `/copernicus-dem`). Heatmap e hillshade usam essa malha. |
 | Mapa de fundo | Tiles Esri World Imagery + rótulos CARTO; o que passar na tela fica em cache. |
-| **Baixar esta bacia** | Recarrega o pacote, grava o retrato hidro atual e baixa os COGs da **bbox inteira** da bacia (dezenas de MB). |
+| **Baixar bacia para o dispositivo** | Recarrega o pacote, grava o retrato hidro atual e baixa os COGs da **bbox inteira** da bacia (dezenas de MB). |
 
 Não há faixa amarela no mapa enquanto a hidrologia vier da rede.
 
-Demarcação de patches, município, sliders e ajuda funcionam iguais online ou offline — o cálculo é local.
+Demarcação de patches (aba **Ferramentas**, com login), município, sliders e ajuda funcionam iguais online ou offline — o cálculo é local.
 
 ---
 
@@ -40,7 +40,7 @@ O que já estiver no aparelho continua utilizável. O que nunca foi baixado **n�
 - **Trocar de bacia** entre pacotes já instalados no build (Tijucas, Itajaí, …).
 - **Simular**: régua, transbordo, janela de tempo, overlay, heatmap **na malha DEM já gravada**.
 - **Tempo Real** com a **última cota ANA conhecida** (não é telemetria do minuto). A previsão de chuva é a **última série Open-Meteo salva**; ela **envelhece**.
-- **Patches** e bacia escolhida no `localStorage`.
+- **Patches** no `localStorage` (cache) e, com Supabase configurado e rede, em `topo_patch_reports`.
 - **Basemap**: só os tiles de satélite/rótulo **já vistos**. Sem tile, o fundo pode ficar cinza; o heatmap ainda pinta se o DEM daquela vista estiver no cache.
 
 ### O que a faixa amarela significa
@@ -61,7 +61,7 @@ No canto do mapa:
 | Tiles de mapa nunca vistos | Fundo vazio/cinza. |
 | WhatsApp / Defesa Civil / feeds novos | Fora do PWA. |
 
-Um install **sem** “Baixar esta bacia” (e sem ter panado o vale com rede) deixa o cidadão com controles e pacote JSON, mas **sem relevo** para pintar a rua.
+Um install **sem** “Baixar bacia para o dispositivo” (e sem ter panado o vale com rede) deixa o cidadão com controles e pacote JSON, mas **sem relevo** para pintar a rua.
 
 ---
 
@@ -71,9 +71,10 @@ Um install **sem** “Baixar esta bacia” (e sem ter panado o vale com rede) de
 | --- | --- | --- |
 | App (shell) + `regions/*.json` + patches + ícones | Precache do service worker | Install / `build` |
 | Último Open-Meteo + ANA (`fetched_at`) | IndexedDB `valealerta` / store `hydro`, chave = id da bacia | Toda leitura boa; também no botão Baixar |
-| COGs Copernicus da bbox | Cache API (`valealerta-copernicus-dem` e Workbox) | **Baixar esta bacia**; COGs da vista também ao usar o mapa |
+| COGs Copernicus da bbox | Cache API (`valealerta-copernicus-dem` e Workbox) | **Baixar bacia para o dispositivo**; COGs da vista também ao usar o mapa |
 | Tiles Esri / CARTO / glifos MapLibre | Cache do service worker (só o já pedido) | Navegação no mapa |
 | Bacia e patches locais | `localStorage` | Já existia antes da PWA |
+| Demarcações (se o banco estiver ligado) | Supabase `topo_patch_reports` | Ao aplicar Δz com login; leitura pública da bacia |
 
 O heatmap **não** é um arquivo salvo: é recalculado no aparelho (cota da água − z do DEM em cache).
 
@@ -95,7 +96,7 @@ Use isto no computador de quem desenvolve. O Chrome só trata `localhost` como i
    O terminal mostra a URL (em geral `http://localhost:4173`). Não use `npm run dev` para testar install: o worker não entra.
 
 2. Abra essa URL no Chrome (mesmo PC, ou o celular na mesma rede só se o preview estiver em HTTPS — em HTTP o install no telefone **não** aparece).
-3. Com internet: escolha a bacia e toque **Baixar esta bacia para o celular**. Espere o “Pronto” (o DEM é grande).
+3. Com internet: escolha a bacia (aba **Simulação**) e toque **Baixar bacia para o dispositivo**. Espere o “Pronto” (o DEM é grande).
 4. Instale:
    - **Chrome (computador):** ícone de instalação na barra de endereço, ou menu ⋮ → **Instalar Vale Alerta**.
    - **Chrome (Android), se a página for `localhost` no próprio aparelho ou HTTPS:** menu → **Instalar aplicativo** / **Adicionar à tela inicial**.
@@ -112,7 +113,7 @@ Quando o Vale Alerta estiver **no ar** (site público em **HTTPS**), o cidadão 
 ### No celular (uso do dia a dia)
 
 1. Com internet, abra o endereço de produção no **navegador** (Chrome no Android; Safari no iPhone). Não use aba anônima.
-2. Escolha o vale (Tijucas, Itajaí, …) e toque **Baixar esta bacia para o celular**. Espere **Pronto** — isso grava cota ANA/Open-Meteo e o relevo Copernicus da bacia.
+2. Escolha o vale (Tijucas, Itajaí, …) e toque **Baixar bacia para o dispositivo**. Espere **Pronto** — isso grava cota ANA/Open-Meteo e o relevo Copernicus da bacia.
 3. Instale o aplicativo:
    - **Android (Chrome):** menu ⋮ → **Instalar aplicativo** ou **Adicionar à tela inicial**. Se o Chrome oferecer o banner **Instalar Vale Alerta**, aceite.
    - **iPhone / iPad (Safari):** botão Compartilhar → **Adicionar à Tela de Início** → Adicionar. O iOS não usa o mesmo prompt do Chrome; o atalho abre em tela cheia (`apple-mobile-web-app-capable`).
@@ -124,7 +125,7 @@ Repita o passo 2 quando mudar de bacia ou quiser um retrato hidro mais novo **an
 ### No computador (Chrome / Edge)
 
 1. Abra a URL HTTPS de produção.
-2. **Baixar esta bacia para o celular** (o nome do botão é o mesmo; o cache fica neste navegador).
+2. **Baixar bacia para o dispositivo** (o cache fica neste navegador / nesta instalação).
 3. Ícone de instalação na barra de endereço, ou menu → **Instalar Vale Alerta**. Abre em janela própria (`display: standalone`).
 
 ### Requisitos do site em produção

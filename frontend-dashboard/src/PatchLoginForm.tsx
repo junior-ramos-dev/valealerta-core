@@ -1,5 +1,45 @@
-import { useState, type CSSProperties, type FormEvent } from "react";
-import { isDatabaseEnabled, loginAppUser, signUpAppUser } from "./auth";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import {
+  isDatabaseEnabled,
+  loginAppUser,
+  signUpAppUser,
+  type AppUser,
+} from "./auth";
+import {
+  loadRegionPack,
+  type RegionCatalog,
+  type RegionCity,
+} from "./region";
+
+const BR_UFS = [
+  "AC",
+  "AL",
+  "AP",
+  "AM",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MT",
+  "MS",
+  "MG",
+  "PA",
+  "PB",
+  "PR",
+  "PE",
+  "PI",
+  "RJ",
+  "RN",
+  "RS",
+  "RO",
+  "RR",
+  "SC",
+  "SP",
+  "SE",
+  "TO",
+] as const;
 
 const fieldStyle: CSSProperties = {
   width: "100%",
@@ -13,26 +53,91 @@ const fieldStyle: CSSProperties = {
 };
 
 export function PatchLoginForm({
+  catalog,
+  currentRegionId,
+  currentCityId,
   onLoggedIn,
 }: {
-  onLoggedIn: (name: string, userId: string, role: string) => void;
+  catalog: RegionCatalog | null;
+  currentRegionId?: string;
+  currentCityId?: string;
+  onLoggedIn: (user: AppUser) => void;
 }) {
   const db = isDatabaseEnabled();
+  const defaultRegion =
+    currentRegionId || catalog?.default_region || catalog?.regions[0]?.id || "";
+  const [mode, setMode] = useState<"in" | "up">("in");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [homeCity, setHomeCity] = useState("");
+  const [homeState, setHomeState] = useState("SC");
+  const [preferredRegionId, setPreferredRegionId] = useState(defaultRegion);
+  const [preferredCityId, setPreferredCityId] = useState(currentCityId ?? "");
+  const [cities, setCities] = useState<RegionCity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const finish = async (mode: "in" | "up") => {
+  useEffect(() => {
+    if (currentRegionId) setPreferredRegionId(currentRegionId);
+  }, [currentRegionId]);
+
+  useEffect(() => {
+    if (currentCityId) setPreferredCityId(currentCityId);
+  }, [currentCityId]);
+
+  useEffect(() => {
+    if (!preferredRegionId) {
+      setCities([]);
+      return;
+    }
+    let cancelled = false;
+    void loadRegionPack(preferredRegionId)
+      .then((pack) => {
+        if (cancelled) return;
+        setCities(pack.cities);
+        setPreferredCityId((prev) =>
+          pack.cities.some((c) => c.id === prev)
+            ? prev
+            : currentCityId && pack.cities.some((c) => c.id === currentCityId)
+              ? currentCityId
+              : pack.target_city_id,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [preferredRegionId, currentCityId]);
+
+  const finish = async (next: "in" | "up") => {
     setBusy(true);
     setError(null);
     try {
-      const user =
-        mode === "up"
-          ? await signUpAppUser(identifier, password, displayName || identifier)
-          : await loginAppUser(identifier, password);
-      onLoggedIn(user.name, user.id, user.role);
+      if (next === "up") {
+        const name = displayName.trim() || identifier.trim();
+        if (name.length < 2) {
+          throw new Error("Informe o nome para o cadastro.");
+        }
+        if (homeCity.trim().length < 2) {
+          throw new Error("Informe a cidade onde você reside.");
+        }
+        if (!preferredRegionId || !preferredCityId) {
+          throw new Error("Escolha a bacia e a cidade padrão do aplicativo.");
+        }
+        const user = await signUpAppUser(identifier, password, {
+          displayName: name,
+          homeCity,
+          homeState,
+          preferredRegionId,
+          preferredCityId,
+        });
+        onLoggedIn(user);
+        return;
+      }
+      onLoggedIn(await loginAppUser(identifier, password));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha no login.");
     } finally {
@@ -42,7 +147,7 @@ export function PatchLoginForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    void finish("in");
+    void finish(mode);
   };
 
   return (
@@ -50,21 +155,99 @@ export function PatchLoginForm({
       onSubmit={submit}
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
+      <div className="patch-auth-modes" role="tablist" aria-label="Entrar ou cadastrar">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "in"}
+          className={mode === "in" ? "is-on" : ""}
+          onClick={() => setMode("in")}
+        >
+          Entrar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "up"}
+          className={mode === "up" ? "is-on" : ""}
+          onClick={() => setMode("up")}
+        >
+          Cadastrar
+        </button>
+      </div>
       <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}>
         {db
-          ? "Entre com e-mail e senha da conta Vale Alerta. As demarcações gravam no banco na hora."
-          : "Banco não configurado (VITE_SUPABASE_URL). Modo local: nome + senha 123."}
+          ? mode === "up"
+            ? "Crie a conta para enviar correções de relevo. A bacia e a cidade padrão abrem o mapa da próxima vez."
+            : "Entre com e-mail e senha. As demarcações gravam no banco na hora."
+          : "Banco não configurado (VITE_SUPABASE_URL). Neste aparelho: nome + senha 123."}
       </p>
-      {db && (
-        <label style={{ fontSize: 11, color: "#aaa" }}>
-          Nome (só na criação da conta)
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            style={{ ...fieldStyle, marginTop: 4 }}
-          />
-        </label>
+      {mode === "up" && (
+        <>
+          <label style={{ fontSize: 11, color: "#aaa" }}>
+            Nome
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              style={{ ...fieldStyle, marginTop: 4 }}
+              autoComplete="name"
+            />
+          </label>
+          <label style={{ fontSize: 11, color: "#aaa" }}>
+            Cidade onde reside
+            <input
+              type="text"
+              value={homeCity}
+              onChange={(e) => setHomeCity(e.target.value)}
+              style={{ ...fieldStyle, marginTop: 4 }}
+              autoComplete="address-level2"
+            />
+          </label>
+          <label style={{ fontSize: 11, color: "#aaa" }}>
+            Estado
+            <select
+              value={homeState}
+              onChange={(e) => setHomeState(e.target.value)}
+              style={{ ...fieldStyle, marginTop: 4 }}
+            >
+              {BR_UFS.map((uf) => (
+                <option key={uf} value={uf}>
+                  {uf}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontSize: 11, color: "#aaa" }}>
+            Bacia padrão ao abrir
+            <select
+              value={preferredRegionId}
+              onChange={(e) => setPreferredRegionId(e.target.value)}
+              style={{ ...fieldStyle, marginTop: 4 }}
+            >
+              {(catalog?.regions ?? []).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.state ? ` (${r.state})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontSize: 11, color: "#aaa" }}>
+            Cidade padrão ao abrir
+            <select
+              value={preferredCityId}
+              onChange={(e) => setPreferredCityId(e.target.value)}
+              style={{ ...fieldStyle, marginTop: 4 }}
+            >
+              {cities.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
       )}
       <label style={{ fontSize: 11, color: "#aaa" }}>
         {db ? "E-mail" : "Usuário"}
@@ -82,7 +265,7 @@ export function PatchLoginForm({
         <input
           type="password"
           name="password"
-          autoComplete="current-password"
+          autoComplete={mode === "up" ? "new-password" : "current-password"}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={{ ...fieldStyle, marginTop: 4 }}
@@ -105,27 +288,8 @@ export function PatchLoginForm({
           fontWeight: 700,
         }}
       >
-        Entrar para demarcar
+        {mode === "up" ? "Criar conta" : "Entrar"}
       </button>
-      {db && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void finish("up")}
-          style={{
-            background: "#2d2d2d",
-            border: "1px solid #444",
-            color: "#fff",
-            borderRadius: 6,
-            padding: "8px 10px",
-            cursor: busy ? "wait" : "pointer",
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          Criar conta
-        </button>
-      )}
     </form>
   );
 }

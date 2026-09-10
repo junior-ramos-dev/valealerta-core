@@ -789,6 +789,40 @@
   box-sizing: border-box;
 }
 
+.sidebar-tabs,
+.patch-auth-modes {
+  display: flex;
+  gap: 6px;
+}
+
+.sidebar-tabs {
+  position: sticky;
+  top: -8px;
+  z-index: 3;
+  padding: 4px 0 8px;
+  background: #1f1f1f;
+}
+
+.sidebar-tabs button,
+.patch-auth-modes button {
+  flex: 1;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  color: #ccc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sidebar-tabs button.is-on,
+.patch-auth-modes button.is-on {
+  background: #1c3a4a;
+  border-color: #00b4d8;
+  color: #7fdbfa;
+}
+
 .sidebar-help-rail {
   width: 0;
   flex-shrink: 0;
@@ -1065,17 +1099,29 @@
   .sidebar-block[data-id="titulo"] {
     order: 1;
   }
-  .sidebar-block[data-id="municipio"] {
+  .sidebar-block[data-id="abas"] {
     order: 2;
   }
-  .sidebar-block[data-id="tempo-real"] {
+  .sidebar-block[data-id="municipio"] {
     order: 3;
   }
-  .sidebar-block[data-id="regua"] {
+  .sidebar-block[data-id="tempo-real"] {
     order: 4;
   }
-  .sidebar-block[data-id="acumulo"] {
+  .sidebar-block[data-id="regua"] {
     order: 5;
+  }
+  .sidebar-block[data-id="acumulo"] {
+    order: 6;
+  }
+  .sidebar-block[data-id="correcao-relevo"] {
+    order: 3;
+  }
+
+  .sidebar-tabs {
+    top: -4px;
+    padding: 0 0 4px;
+    background: #1f1f1f;
   }
 
   .sheet-expanded-only {

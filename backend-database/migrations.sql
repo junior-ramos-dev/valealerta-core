@@ -25,6 +25,8 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles add column if not exists role public.app_role not null default 'reporter';
+alter table public.profiles add column if not exists preferred_region_id text;
+alter table public.profiles add column if not exists preferred_city_id text;
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -33,14 +35,24 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, display_name, role)
+  insert into public.profiles (
+    id,
+    display_name,
+    role,
+    municipality,
+    preferred_region_id,
+    preferred_city_id
+  )
   values (
     new.id,
     coalesce(
       new.raw_user_meta_data ->> 'display_name',
       split_part(new.email, '@', 1)
     ),
-    'reporter'
+    'reporter',
+    nullif(trim(coalesce(new.raw_user_meta_data ->> 'municipality', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data ->> 'preferred_region_id', '')), ''),
+    nullif(trim(coalesce(new.raw_user_meta_data ->> 'preferred_city_id', '')), '')
   )
   on conflict (id) do nothing;
   return new;

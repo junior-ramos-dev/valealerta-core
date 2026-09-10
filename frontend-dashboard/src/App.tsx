@@ -44,7 +44,9 @@ import {
   nearestCity,
   riverBranchIdsForCity,
   setActiveRegion,
+  resolveFocusCityId,
   staffForCity,
+  storeCityId,
   storeRegionId,
   surgeLagH,
   tryGetRegion,
@@ -86,6 +88,7 @@ import {
   logoutAppUser,
   restoreAppUser,
   type AppRole,
+  type AppUser,
 } from "./auth";
 import {
   deleteRemotePatch,
@@ -298,6 +301,7 @@ export default function App() {
   const [topoMeta, setTopoMeta] = useState<string | null>(null);
   const [liveRiver, setLiveRiver] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"sim" | "tools">("sim");
   const [hydro, setHydro] = useState<HydroSnapshot | null>(null);
   const [hydroError, setHydroError] = useState<string | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
@@ -541,7 +545,7 @@ export default function App() {
         if (abort.signal.aborted) return;
         setCatalog(nextCatalog);
         setRegion(pack);
-        const staff = staffForCity(pack, pack.target_city_id);
+        const staff = staffForCity(pack, resolveFocusCityId(pack));
         setFocusCityId(staff.city_id);
         setWaterLevelCm(staff.normal_stage_cm);
         setSpillStageM(staff.spill_stage_m);
@@ -561,7 +565,7 @@ export default function App() {
     setActiveRegion(pack);
     storeRegionId(pack.id);
     setRegion(pack);
-    const staff = staffForCity(pack, pack.target_city_id);
+    const staff = staffForCity(pack, resolveFocusCityId(pack));
     setFocusCityId(staff.city_id);
     setWaterLevelCm(staff.normal_stage_cm);
     setSpillStageM(staff.spill_stage_m);
@@ -586,6 +590,29 @@ export default function App() {
         console.error(error);
         setRegionError("Falha ao trocar de bacia.");
       });
+  };
+
+  const applyPlacePrefs = (user: AppUser) => {
+    const regionId = user.preferredRegionId;
+    const cityId = user.preferredCityId;
+    if (regionId) storeRegionId(regionId);
+    if (regionId && cityId) storeCityId(regionId, cityId);
+    const pack = tryGetRegion();
+    if (!pack) return;
+    if (regionId && regionId !== pack.id) {
+      switchRegion(regionId);
+      return;
+    }
+    if (cityId) applyCityStaffRef.current(cityId, true);
+  };
+
+  const onPatchLoggedIn = (user: AppUser) => {
+    setPatchUsername(user.name);
+    setPatchUserId(user.id);
+    setPatchRole(user.role);
+    setCanEditPatches(true);
+    if (user.role === "admin") void listProfiles().then(setUserList);
+    applyPlacePrefs(user);
   };
 
   useEffect(() => {
@@ -1116,11 +1143,7 @@ export default function App() {
   useEffect(() => {
     void restoreAppUser().then((user) => {
       if (!user) return;
-      setCanEditPatches(true);
-      setPatchUsername(user.name);
-      setPatchUserId(user.id);
-      setPatchRole(user.role);
-      if (user.role === "admin") void listProfiles().then(setUserList);
+      onPatchLoggedIn(user);
     });
   }, []);
 
@@ -1539,7 +1562,7 @@ export default function App() {
           id="titulo"
           slot="peek"
           title={region.title}
-          help="O botão Ajuda abre o painel de textos. Esc fecha. No computador, passe o mouse num bloco para ver o par. No celular, a barra vira uma folha baixa na base da tela — o mapa continua visível. Role a folha para overlay, escala e patches."
+          help="As abas Simulação e Ferramentas separam a régua da correção de relevo. O botão Ajuda abre o painel de textos. Esc fecha. No computador, passe o mouse num bloco para ver o par. No celular, a barra vira uma folha baixa na base da tela — o mapa continua visível."
         >
           <div className="sidebar-title-row">
             <div>
@@ -1564,6 +1587,40 @@ export default function App() {
           </div>
         </SidebarSection>
 
+        <SidebarSection
+          id="abas"
+          slot="peek"
+          title="Abas da barra"
+          help="Simulação concentra bacia, município, overlay, régua e chuva. Ferramentas concentra a correção de relevo: cadastro, demarcações e a simulação com Δz."
+        >
+          <div
+            className="sidebar-tabs"
+            role="tablist"
+            aria-label="Seções da barra"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === "sim"}
+              className={sidebarTab === "sim" ? "is-on" : ""}
+              onClick={() => setSidebarTab("sim")}
+            >
+              Simulação
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === "tools"}
+              className={sidebarTab === "tools" ? "is-on" : ""}
+              onClick={() => setSidebarTab("tools")}
+            >
+              Ferramentas
+            </button>
+          </div>
+        </SidebarSection>
+
+        {sidebarTab === "sim" ? (
+        <>
         <SidebarSection
           id="bacia"
           slot="more"
@@ -1647,12 +1704,12 @@ export default function App() {
           >
             {basinPrep === "working"
               ? "Baixando…"
-              : "Baixar esta bacia para o celular"}
+              : "Baixar bacia para o dispositivo"}
           </button>
           <button
             type="button"
             className="basin-offline-help"
-            aria-label="O que significa baixar esta bacia para o celular"
+            aria-label="O que significa baixar bacia para o dispositivo"
             aria-expanded={pwaGuideOpen}
             aria-haspopup="dialog"
             title="O que significa baixar esta bacia"
@@ -1697,6 +1754,7 @@ export default function App() {
             value={focusCityId}
             onChange={(e) => {
               const id = e.target.value;
+              if (region) storeCityId(region.id, id);
               const city = cities.find((c) => c.id === id);
               flyingToCityRef.current = true;
               applyCityStaffRef.current(id, true);
@@ -2379,7 +2437,7 @@ export default function App() {
           id="sonda"
           slot="more"
           title="Sonda do mapa"
-          help="No celular a cota e as coordenadas ficam nesta lista, junto da correção de relevo — quem demarca um aterro precisa do ponto. No computador elas ficam no card do mapa, com a data. Toque no mapa para fixar; Seguir o mapa volta ao centro da vista."
+          help="No celular a cota e as coordenadas ficam nesta lista. No computador elas ficam no card do mapa, com a data. Toque no mapa para fixar; Seguir o mapa volta ao centro da vista."
         >
           <div className="sidebar-probe">
             <label
@@ -2408,10 +2466,13 @@ export default function App() {
           </div>
         </SidebarSection>
         ) : null}
+        </>
+        ) : null}
 
+        {sidebarTab === "tools" ? (
         <SidebarSection
           id="correcao-relevo"
-          slot="more"
+          slot="peek"
           title="Correção de relevo (aterro)"
           help="Demarcações vão para a tabela topo_patch_reports (GeoJSON + Δz + usuário) quando o Supabase está configurado. Papéis: relator, validador (in loco), admin. A vista “todas” faz a média de Δz nas sobreposições; vermelho = divergência ≥ 1 m. Sem VITE_SUPABASE_URL o modo local (senha 123) continua. Isso não é parecer da Defesa Civil."
         >
@@ -2461,6 +2522,22 @@ export default function App() {
               </button>
             )}
           </label>
+          {!canEditPatches && (
+          <p className="relief-whatif-note">
+            Para enviar correções de relevo (aterro, corte) é preciso estar
+            cadastrado. A simulação na aba Simulação continua disponível sem
+            login.
+          </p>
+          )}
+          {!canEditPatches ? (
+            <PatchLoginForm
+              catalog={catalog}
+              currentRegionId={region.id}
+              currentCityId={focusCityId}
+              onLoggedIn={onPatchLoggedIn}
+            />
+          ) : (
+            <>
           <button
             type="button"
             className={`relief-whatif-btn${reliefWhatIf ? " is-on" : ""}`}
@@ -2501,18 +2578,6 @@ export default function App() {
               ? "Sobreposições viram um polígono só, com Δz médio (um voto por relator). Vermelho = divergência de altura ≥ 1 m. Verde = relatos alinhados. A área pode diferir um pouco."
               : "Só os polígonos deste usuário (e os sem autor, gravados antes)."}
           </p>
-          {!canEditPatches ? (
-            <PatchLoginForm
-              onLoggedIn={(name, userId, role) => {
-                setPatchUsername(name);
-                setPatchUserId(userId);
-                setPatchRole(role as AppRole);
-                setCanEditPatches(true);
-                if (role === "admin") void listProfiles().then(setUserList);
-              }}
-            />
-          ) : (
-            <>
               <p
                 style={{
                   margin: 0,
@@ -2914,6 +2979,7 @@ export default function App() {
           )}
         </div>
         </SidebarSection>
+        ) : null}
       </SidebarDock>
 
       <div className="map-stage">

@@ -113,6 +113,7 @@ export type RegionCatalog = {
 };
 
 const STORAGE_KEY = "valealerta-region-id";
+const CITY_STORAGE_PREFIX = "valealerta-city:";
 
 let active: RegionPack | null = null;
 
@@ -146,6 +147,30 @@ export function storeRegionId(id: string): void {
   } catch {
     /* ignore quota */
   }
+}
+
+export function readStoredCityId(regionId: string): string | null {
+  try {
+    const id = localStorage.getItem(`${CITY_STORAGE_PREFIX}${regionId}`);
+    return id && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function storeCityId(regionId: string, cityId: string): void {
+  try {
+    localStorage.setItem(`${CITY_STORAGE_PREFIX}${regionId}`, cityId);
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Stored city for this pack, or the pack's target municipality. */
+export function resolveFocusCityId(pack: RegionPack): string {
+  const stored = readStoredCityId(pack.id);
+  if (stored && pack.cities.some((city) => city.id === stored)) return stored;
+  return pack.target_city_id;
 }
 
 /** Horas da onda da cidade de surge até o alvo (janela de escape / ocupação da planície). */

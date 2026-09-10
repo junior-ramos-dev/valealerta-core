@@ -29,6 +29,33 @@ export function tryDummyLogin(username: string, password: string): string | null
   return name;
 }
 
+export type DummyPlacePrefs = {
+  municipality?: string;
+  preferredRegionId?: string;
+  preferredCityId?: string;
+};
+
+const PREFS_KEY = "valealerta-dummy-profile";
+
+export function readDummyPlacePrefs(): DummyPlacePrefs | null {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DummyPlacePrefs;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDummyPlacePrefs(prefs: DummyPlacePrefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore quota */
+  }
+}
+
 export function dummyLogout(): void {
   try {
     sessionStorage.removeItem(SESSION_KEY);

@@ -59,26 +59,36 @@ Se o resultado for maior que zero, o pixel acende na cor correspondente do heatm
 
 Resumo (o dashboard em `frontend-dashboard/`):
 
+- [Barra: Simulação e Ferramentas](#barra-simulação-e-ferramentas)
 - [Mapa híbrido e navegação](#mapa-híbrido-e-navegação)
 - [Relevo Copernicus na vista](#relevo-copernicus-na-vista)
 - [Heatmap de profundidade](#heatmap-de-profundidade)
 - [Régua do rio e cota de transbordo](#régua-do-rio-e-cota-de-transbordo)
 - [Previsão de 7 dias (Open-Meteo)](#previsão-de-7-dias-open-meteo)
+- [Previsão horária (12 h)](#previsão-horária-12-h)
 - [Escala de profundidade (cm e mm/h)](#escala-de-profundidade-cm-e-mmh)
 - [Janela de escape](#janela-de-escape)
 - [Tempo real (ANA × Open-Meteo)](#tempo-real-ana--open-meteo)
 - [Sonda do terreno](#sonda-do-terreno)
 - [Correção de relevo (demarcação / aterro)](#correção-de-relevo-demarcação--aterro)
+- [Contas, papéis e banco](#contas-papéis-e-banco)
 - [Backend e configuração regional](#backend-e-configuração-regional)
-- [App no celular (PWA)](#app-no-celular-pwa)
+- [App no dispositivo (PWA)](#app-no-dispositivo-pwa)
+
+### Barra: Simulação e Ferramentas
+
+- Duas abas no topo da barra (e da folha no celular): **Simulação** e **Ferramentas**.
+- **Simulação:** bacia, município, overlay Copernicus, régua, Tempo Real, chuva (24 h / 12 h / 7 d), janela de escape. No celular, a **Sonda do mapa** também fica nesta lista; no computador a sonda continua no card do mapa.
+- **Ferramentas:** correção de relevo. Sem login: aviso de que cadastro é obrigatório para enviar correções + formulário **Entrar | Cadastrar**. Com login: demarcar, Δz, vistas Minhas/Todas, simular com correções, GeoJSON.
+- Botão **Ajuda** ao lado do título: abre uma segunda coluna à direita, com uma caixa por controle visível na aba atual. Com a ajuda aberta, o bloco e a caixa correspondente ganham borda; o hover destaca o par. Esc fecha. No celular a barra vira uma folha baixa; o mapa continua visível.
+- **Baixar bacia para o dispositivo** (aba Simulação): grava pacote, retrato Open-Meteo/ANA e tiles Copernicus da bbox. Serve para PWA no telefone **e** no computador.
 
 ### Mapa híbrido e navegação
 
 - Mapa **Esri World Imagery** + rótulos transparentes **CARTO Positron Labels**, com MapLibre GL JS.
-- Seletor **Bacia**: Tijucas ou Itajaí. **Município do vale**: voa até a cidade e aplica a **régua e o transbordo iniciais daquele município**. Pan/zoom atualizam a cota pela cidade mais próxima da vista (se você já mexeu na régua, ela permanece).
+- Seletor **Bacia**: Tijucas ou Itajaí. **Município do vale**: voa até a cidade e aplica a **régua e o transbordo iniciais daquele município**. A escolha fica como padrão desta bacia na próxima abertura. Pan/zoom atualizam a cota pela cidade mais próxima da vista (se você já mexeu na régua, ela permanece).
 - Após pan, zoom ou troca de cidade, o app **espera 1 segundo** e recarrega relevo + heatmap para a **área visível** (com ~2 km de folga no grid de inundação para o rio não “sair” da malha).
 - Badge no mapa com o **dia da semana** e se a mancha é Agora ou Previsão; lâmpadas verde/vermelha nos sliders indicam qual camada está viva.
-- Botão **Ajuda** no canto superior direito da barra (ao lado do título): abre uma segunda coluna à direita, com uma caixa por controle (mesmo título, empilhadas). Com a ajuda aberta, o bloco e a caixa correspondente ganham borda; o hover destaca o par. Esc fecha.
 
 ### Relevo Copernicus na vista
 
@@ -89,11 +99,13 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 ### Heatmap de profundidade
 
-- Superfície d’água **única na vista**: cota = talvegue amostrado no DEM + régua × ocupação da onda.
-- Preenchimento hidrológico a partir do rio (flood-fill) para células abaixo dessa cota, com folga (~0,55 m) para ruído do DSM.
+- A mancha nas ruas é só o **excesso sobre o transbordo municipal**: `extra = max(0, régua − sai da calha)`. Régua 5 m com transbordo 6 m → **sem** heatmap de rua.
+- Superfície d’água na vista: **WSE = talvegue do GLO-30 cru** (leito sem Δz de aterro) + extra × ocupação da janela de escape. O aterro **não sobe o rio**; só muda o terreno da rua.
+- Preenchimento a partir do rio (flood-fill). Folga (~0,55 m) para ruído do DSM: a água pode passar, mas só pinta célula com z abaixo do WSE.
 - Cores por profundidade **local**: **10, 25, 50, 75, 100 … 250 cm**.
-- Só **uma** mancha por vez: arrastar a régua pinta **Agora**; arrastar os dias Open-Meteo pinta **Previsão** e **liga Tempo Real**. As duas nunca se sobrepõem.
-- O overlay fica **georreferenciado** na malha do DEM (vista + ~2 km de folga). Pan e zoom acompanham heatmap e relevo. Depois de 1 s parado, os dois são recalculados na vista nova — a mancha não fica cortada no recorte do zoom anterior.
+- Só **uma** mancha por vez: arrastar a régua pinta **Agora**; arrastar as 12 h ou os 7 dias pinta **Previsão** e **liga Tempo Real**.
+- Com **simular correções de relevo** ligado, se o polígono ocupar volume que estava inundado, esse volume **sobe a lâmina no entorno** (até ~4 m de acréscimo). Polígono pequeno diante da mancha → milímetros; o HUD mostra m³ deslocados.
+- O overlay fica **georreferenciado** na malha do DEM (vista + ~2 km de folga). Após 1 s parado, relevo e heatmap recalculam.
 
 ### Régua do rio e cota de transbordo
 
@@ -101,16 +113,22 @@ Resumo (o dashboard em `frontend-dashboard/`):
 - Em São João Batista, a Defesa Civil registra ruas alagadas a partir de **6 m** nesta régua (Ribanceira do Sul / Loteamento Piva). Picos documentados: **6,85 m** (maio/2024, SDR/SC) e cerca de **9 m** (dez/2022, Epagri/Ciram).
 - Seletor **sai da calha**: **6,0–8,0 m** em passos de 50 cm (marca amarela na régua). A escala mm/h da legenda usa essa cota.
 - A série ANA 84095500 (dezenas de cm em estiagem) usa o **mesmo zero** de estiagem, não a cota municipal de transbordo.
-- **Resetar para condições normais**: régua na cota ANA ao vivo (ou ~30 cm), previsão no dia 1, janela +4 h, camada Agora.
+- **Resetar para condições normais**: régua na cota ANA ao vivo (ou ~30 cm), previsão no **hoje** (slider 1), 12 h no primeiro passo, janela +4 h, camada Agora.
 
 ### Previsão de 7 dias (Open-Meteo)
 
 - Caixa **próximas 24 h**: volume bruto e efetivo na janela rolante de 24 h (não é o dia 1 do slider).
-- A semana **começa hoje**: slider 1 = restante de hoje; 7 = até o mesmo dia da semana seguinte menos um.
+- A semana **começa hoje**: o slider inicia em **1** (hoje). 7 = até o mesmo dia da semana seguinte menos um.
 - Arrastar o slider **liga Tempo Real**: a régua não pode ficar abaixo da cota ANA, e o heatmap Previsão soma a chuva efetiva sobre essa régua (não sobre um rio “normal” no app).
 - Chuva **efetiva** (não a soma bruta de 7 dias): balde horário com **meia-vida de 12 h**. Intervalos secos esvaziam o balde.
 - Média a montante. Subida: `ΔH = chuva_efetiva_mm × coeficiente da bacia`. Cota no mapa ≈ régua (piso ANA se Tempo Real) + ΔH.
 - A camada Previsão usa as **mesmas cores** de profundidade sobre o DEM da tela.
+
+### Previsão horária (12 h)
+
+- Slider **1–12 h** entre a caixa das 24 h e o acúmulo de 7 dias.
+- Cada passo é **1 h** da série Open-Meteo; o acumulado soma as horas já percorridas (ex.: 20 mm/h + 20 mm/h + 10 mm = 50 mm), não “o valor da hora × 12”.
+- Arrastar liga Tempo Real e pinta a mancha de **Previsão** daquela janela. O HUD mostra `+N h · HHh`.
 
 ### Escala de profundidade (cm e mm/h)
 
@@ -126,7 +144,7 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 ### Tempo real (ANA × Open-Meteo)
 
-- Checkbox **Tempo Real**: fica **acima** da caixa das 24 h e do slider de 7 dias (não no topo da barra). Ligado, mostra a cota ANA e ela vira o **mínimo** da régua (dá para simular acima, não abaixo). Desligado, a régua é livre desde 0. Mover a previsão de chuva liga o checkbox automaticamente.
+- Checkbox **Tempo Real**: fica **acima** da caixa das 24 h e dos sliders de 12 h / 7 dias. Ligado, mostra a cota ANA e ela vira o **mínimo** da régua. Desligado, a régua é livre desde 0. Mover qualquer previsão de chuva liga o checkbox.
 - **Resetar para condições normais**: com o checkbox ligado, volta à cota ANA ao vivo (ex.: 2 m se o rio já subiu); desligado, volta ao nível natural do município.
 - Telemetria **ANA HidroWeb** (estações do pacote da bacia) e chuva Open-Meteo.
 
@@ -134,20 +152,38 @@ Resumo (o dashboard em `frontend-dashboard/`):
 
 - Mover o cursor no mapa mostra lat/lon e o **z do GLO-30** no ponto (amostra bilinear).
 - Sobre a mancha, um **box no ponteiro** mostra profundidade em **cm** (cor da faixa) e **mm/h** da legenda.
-- Clique **fixa** o pino. Painel: cota do terreno, régua, talvegue, cota da água (WSE) e se o ponto está acima ou abaixo da lâmina.
+- Clique **fixa** o pino. No computador o card fica no mapa; no celular, **Sonda do mapa** na aba **Simulação**. Cota do terreno, régua, talvegue, cota da água (WSE) e se o ponto está acima ou abaixo da lâmina.
 - Aviso no painel: aterro recente pode **não** estar no GLO-30 — use a correção de relevo se a obra for conhecida.
 
 ### Correção de relevo (demarcação / aterro)
 
-O Copernicus não “vê” obra de ontem. Quem tem autorização pode **somar um Δz local** só no polígono da mudança, sem substituir o DEM da bacia:
+O Copernicus não “vê” obra de ontem. Relatores autenticados **somam um Δz** só no polígono da mudança:
 
 `z_usado = z_Copernicus + Δz` (ex.: +2 m de aterro; valor **relativo**, não cota absoluta MSL).
 
-- O formulário fica no **fim da barra lateral**. Sem login, só aparece o pedido de autenticação. Conta dummy provisória (até existir login de verdade): usuário `usuario`, senha `123`. Sessão nesta aba do browser; **Sair** encerra.
-- Fluxo: **Demarcar área** → vértices no mapa (mínimo 3; clique num ponto para tirá-lo; desfazer último ponto) → Δz em metros → **Aplicar Δz**. Dá para nomear, modificar, remover e **baixar GeoJSON**.
-- Patches **locais** ficam no `localStorage` **por bacia**. O arquivo canônico versionado é `regions/<id>.patches.geojson` (Vite serve em `/regions/<id>.patches.geojson`).
-- A correção entra na malha **antes** do hillshade e do flood-fill (`copernicusDem.ts` + `topoPatches.ts`).
-- **Absorção pelo DEM:** na criação, o app grava a cota média Copernicus **crua** dentro do polígono. A cada carga do relevo, compara com a média atual. Se o terreno já subiu ~Δz, o patch é marcado **absorvido** e **não é somado** (evita contar a obra duas vezes quando o GLO-30 atualizar). Se a cota mudou de outro jeito, pede **revisão**. Dá para **somar mesmo assim** ou remover. Folga grande de propósito: o GLO-30 erra com frequência 2–4 m na vertical.
+- Tudo isto fica na aba **Ferramentas**. Sem conta: só o formulário e o aviso; a simulação de inundação na aba **Simulação** continua sem login.
+- **Simular inundação com correções de relevo** (depois do login): liga o Δz no hillshade e no heatmap. Desligado, o modelo volta ao GLO-30 puro; o polígono continua no mapa, mais apagado.
+- **Minhas marcações** / **Todas as marcações**: na vista de todos, relatos com sobreposição (IoU ≥ 0,45) viram **um sítio**. O Δz é a **média com um voto por pessoa** (não se somam +2 m e +1 m). Amplitude de altura ≥ **1 m** → polígono **vermelho**; relatos alinhados → **verde**; um relator só → amarelo. Área um pouco maior ou menor não desfaz o grupo.
+- Demarcar: login (ver [contas](#contas-papéis-e-banco)) → **Demarcar área** → vértices (mínimo 3). Com 3 ou mais, **clique no primeiro ponto** (verde, maior) para fechar; duplo clique ou Enter também fecha. Desfazer remove o último vértice. Δz → **Aplicar Δz**.
+- Enquanto desenha, a **área** aparece em m² e em “campos de futebol em área” (105×68 m). Um quadrado de ~230 m de lado são ~7,5 campos em área, não 2–3 comprimentos de campo.
+- A correção entra na malha **antes** do hillshade e do flood-fill. O **talvegue** continua no GLO-30 cru.
+- **Absorção pelo DEM:** na criação, grava a cota média Copernicus **crua** no polígono. Se uma revisão do GLO-30 já subiu ~Δz, o patch fica **absorvido** e não soma de novo (salvo na simulação hipotética ou “somar mesmo assim”). Folga grande: o GLO-30 erra com frequência 2–4 m na vertical.
+- Cópia de segurança: **Baixar GeoJSON**. Não há upload de arquivo: o fluxo normal é gravar no banco (ou no `localStorage` se o Supabase não estiver configurado).
+- `regions/<id>.patches.geojson` continua sendo o pacote **versionado no repositório** (Vite: `/regions/<id>.patches.geojson`).
+
+### Contas, papéis e banco
+
+Com `frontend-dashboard/.env.local` (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`):
+
+- **Entrar:** e-mail e senha. **Cadastrar:** nome, cidade e estado onde reside, bacia e município padrão ao abrir o app, e-mail e senha. Papel inicial: relator. Os padrões gravam no perfil (`municipality`, `preferred_region_id`, `preferred_city_id`) e neste aparelho.
+- A chave no painel novo do Supabase é **Publishable** (`sb_publishable_…`) ou, na aba legado, **anon**. Não use senha do Postgres nem `service_role` no app.
+- Ao **Aplicar Δz**, a linha vai para `public.topo_patch_reports` (Polygon em `geojson`, Δz, `user_id`, `form`). Quem abre o mapa lê as demarcações **assim que são salvas**.
+- Papéis em `public.profiles.role`: **reporter** (padrão), **validator** (botão validar in loco), **admin** (troca papéis na barra). Primeiro admin no SQL: `update public.profiles set role = 'admin' where id = '<uid>';`
+- Schema: `backend-database/migrations.sql` (PostGIS + `auth.users`). Exemplo de env: `frontend-dashboard/.env.example`.
+
+Sem essas variáveis o app fica no **modo local**: qualquer nome (2+ letras) + senha `123`, dados só neste navegador.
+
+Validação institucional (Defesa Civil in loco) **não** é automática: o app só agrupa relatos e marca divergência de altura. O parecer continua humano.
 
 ### Backend e configuração regional
 
@@ -156,7 +192,7 @@ O Copernicus não “vê” obra de ontem. Quem tem autorização pode **somar u
 - `python3 backend-satellite/fetch_hydro.py` (ou `VALEALERTA_REGION=itajai …`): Open-Meteo 7 dias + ANA → `data/hydro_now.json`.
 - Plugin Vite: `GET /regions/*` lê a pasta `regions/`.
 - Como criar outra bacia: **`CONTRIBUTING.md`**.
-- `backend-database/migrations.sql`: esquema PostGIS/Supabase para **perfis** e **pins de risco comunitário** (estrutura pronta; o mapa cidadão ainda não consome esses pins).
+- `backend-database/migrations.sql`: perfis com papéis, `topo_patch_reports` (demarcações) e `hazard_pins` (pins de foto — ainda não no mapa).
 
 ---
 
@@ -174,8 +210,9 @@ Para carregar rápido em celulares com sinal fraco, o cálculo de inundação ro
  📱 [DASHBOARD — Vite + React + MapLibre]
     ├── Mapa híbrido Esri + CARTO
     ├── Proxy Vite → Copernicus GLO-30 (S3) e ANA (sem CORS no S3/ANA)
-    ├── Open-Meteo direto no cliente (7 dias)
-    └── Heatmap: DEM da vista − lâmina (régua ou previsão) + patches Δz locais
+    ├── Open-Meteo direto no cliente (7 dias + janela horária)
+    ├── Supabase (opcional): contas e demarcações Δz
+    └── Heatmap: WSE (talvegue cru + extra de transbordo) − z do terreno (com Δz se a simulação estiver ligada)
 ```
 
 O diagrama abaixo descreve a **visão-alvo** do produto (radar Sentinel-1, Supabase alimentado pelo cron, deep links). Itens ainda não ligados ao dashboard estão marcados na seção *Roadmap*.
@@ -184,7 +221,7 @@ O diagrama abaixo descreve a **visão-alvo** do produto (radar Sentinel-1, Supab
  ☁️ [SERVER CRON JOB]          (parcialmente implementado: fetch_hydro.py)
     ├── 1. Coleta previsões (Open-Meteo) e níveis de rios (ANA)
     ├── 2. Radar Sentinel-1 SAR          → planejado
-    └── 3. Banco (Supabase / PostGIS)    → migrations prontas
+    └── 3. Banco (Supabase / PostGIS)    → migrations + dashboard (contas e patches)
          │
          ▼
  📱 [APLICATIVO DO CIDADÃO (React + MapLibre)]
@@ -202,7 +239,7 @@ O diagrama abaixo descreve a **visão-alvo** do produto (radar Sentinel-1, Supab
 | Chuva prevista 7 dias | **Open-Meteo Forecast API** (`hourly=precipitation`, `forecast_days=7`, sem API key; modelos GFS, ECMWF e outros) | `frontend-dashboard/src/hydro.ts` e `fetch_hydro.py` |
 | Cota e vazão | **ANA HidroWeb** — `ServiceANA.asmx/DadosHidrometeorologicos` | Proxy Vite `/ana-hidro` |
 | Cota de transbordo | Defesa Civil / CEOPS **de cada município** | `cities[].spill_stage_m` em `regions/<id>.json` (fallback `hydro.spill_stage_*`) |
-| Esquema espacial | **PostGIS** (Supabase) | `backend-database/migrations.sql` |
+| Esquema espacial e demarcações | **PostGIS** (Supabase) | `backend-database/migrations.sql`; cliente `@supabase/supabase-js` |
 | Radar de validação | **Sentinel-1 SAR (ESA / CDSE)** | Planejado (não no dashboard atual) |
 | Terrain-RGB (MapTiler/AWS) | Tiles Terrarium | Fonte declarada no estilo; o overlay operacional é o GLO-30 |
 
@@ -219,11 +256,11 @@ Endpoints úteis:
 * **Frontend:** Vite + React + TypeScript (`frontend-dashboard/`).
 * **Mapas:** MapLibre GL JS.
 * **DEM:** `geotiff` + hillshade/inundação em canvas (`copernicusDem.ts`, `inundation.ts`).
-* **Patches de relevo:** `topoPatches.ts` (GeoJSON, Δz, checagem de absorção pelo GLO-30); login dummy em `dummyAuth.ts`.
-* **Hidrologia no cliente:** `hydro.ts` (Open-Meteo + ANA + fórmula de subida).
+* **Patches de relevo:** `topoPatches.ts` (Δz, consenso, absorção); `patchApi.ts` + `auth.ts` + `supabaseClient.ts` quando o banco está configurado; `dummyAuth.ts` no modo local.
+* **Hidrologia no cliente:** `hydro.ts` (Open-Meteo horário/7 dias + ANA + fórmula de subida).
 * **Python:** `backend-satellite/fetch_hydro.py` (stdlib + JSON; numpy não é obrigatório neste script).
-* **Banco (preparado):** Supabase / PostgreSQL + PostGIS.
-* **Ainda não no app:** Web Share API / deep link `?rain=&window=&lat=`, pins comunitários, Sentinel-1.
+* **Banco:** Supabase / PostgreSQL + PostGIS (`profiles.role`, `topo_patch_reports.geojson`).
+* **Ainda não no app:** Web Share API / deep link `?rain=&window=&lat=`, pins comunitários (`hazard_pins`), Sentinel-1.
 
 ---
 
@@ -243,15 +280,20 @@ valealerta-core/
 │   ├── fetch_hydro.py
 │   └── data/hydro_now.json
 ├── backend-database/
-│   └── migrations.sql
+│   └── migrations.sql       # perfis, papéis, topo_patch_reports, hazard_pins
 └── frontend-dashboard/
     ├── README.md
+    ├── .env.example         # VITE_SUPABASE_URL + chave publishable/anon
     ├── vite.config.ts       # Proxies + /regions/*
     └── src/
-        ├── region.ts        # Loader dos pacotes
+        ├── region.ts
         ├── App.tsx
-        ├── hydro.ts         # Motor (lê o pacote ativo)
-        └── inundation.ts
+        ├── hydro.ts
+        ├── inundation.ts
+        ├── topoPatches.ts
+        ├── auth.ts
+        ├── patchApi.ts
+        └── supabaseClient.ts
 ```
 
 Para outra região: copie um JSON em `regions/` e registre-o em `index.json` (`CONTRIBUTING.md`). Não edite constantes de cidade em TypeScript.
@@ -266,11 +308,12 @@ Requer **Node.js**. O proxy do Vite é necessário para o DEM Copernicus (S3 sem
 
 ```bash
 cd frontend-dashboard
+cp .env.example .env.local   # opcional: URL + chave publishable do Supabase
 npm install
 npm run dev
 ```
 
-Abra o endereço do terminal (em geral `http://localhost:5173`). O mapa inicia em São João Batista; use o seletor de município e os modos **Agora** / **Previsão 7d**.
+Abra o endereço do terminal (em geral `http://localhost:5173`). Sem `.env.local` o login de demarcação (aba **Ferramentas**) é o modo local (nome + `123`). Com Supabase, use e-mail/senha. O mapa inicia na bacia/cidade gravadas neste aparelho (ou no perfil, se houver login); senão, no alvo do pacote (São João Batista no Tijucas). **Agora**, **12 h** e **7 dias** pintam a mancha de previsão.
 
 Para **instalar como PWA** (ícone na tela inicial, service worker), use HTTPS ou `localhost` com o build de produção:
 
@@ -280,13 +323,15 @@ npm run build
 npm run preview
 ```
 
-O `npm run dev` não registra o worker (evita briga com o HMR). No celular, abra o preview (ou o host HTTPS), use **Baixar esta bacia para o celular** com internet, depois Instalar aplicativo / Adicionar à tela de início.
+O `npm run dev` não registra o worker (evita briga com o HMR). No preview (ou no host HTTPS), no computador ou no celular, use **Baixar bacia para o dispositivo** com internet, depois Instalar aplicativo / Adicionar à tela de início (ou Dock).
 
-### App no celular (PWA)
+### App no dispositivo (PWA)
+
+A PWA instala no telefone **e** no Chrome/Edge do computador (janela própria) ou no Safari (Dock / Tela de Início).
 
 - Precache: casco do app, `regions/*.json`, patches, ícones.
 - Último retrato Open-Meteo + ANA em **IndexedDB** (`fetched_at`). Offline, Tempo Real usa essa cota, não a ANA ao vivo. A previsão **envelhece** (faixa amarela no mapa).
-- Copernicus DEM: tiles da bbox da bacia após **Baixar esta bacia** (dezenas de MB). Pan para uma área sem tile = sem heatmap.
+- Copernicus DEM: tiles da bbox da bacia após **Baixar bacia para o dispositivo** (dezenas de MB). Pan para uma área sem tile = sem heatmap.
 - Basemap Esri/CARTO: só tiles já vistos.
 - Não fica “ao vivo” sem rede: ANA nova, Open-Meteo novo, DEM não baixado.
 
@@ -301,9 +346,12 @@ python3 fetch_hydro.py
 
 Saídas: `backend-satellite/data/hydro_now.json` e, se a pasta existir, `frontend-dashboard/public/hydro_now.json`.
 
-### 3. Banco (opcional)
+### 3. Banco (Supabase)
 
-Execute `backend-database/migrations.sql` num projeto Supabase (PostGIS + `auth.users`).
+1. Crie o projeto, ative PostGIS e rode `backend-database/migrations.sql` no SQL Editor.
+2. Em **Settings → API Keys**, copie a **Publishable key** (ou **anon** na aba legado) — não a senha do banco.
+3. `frontend-dashboard/.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`; reinicie o Vite.
+4. Crie a conta no app (aba **Ferramentas** → **Cadastrar**). Primeiro admin: `update public.profiles set role = 'admin' where id = '<uid>';` (Authentication → Users). Em projeto já criado, rode de novo o trecho de `profiles` em `migrations.sql` se faltar `preferred_region_id` / `preferred_city_id`.
 
 ---
 
@@ -315,6 +363,7 @@ Este é um ecossistema construído pela comunidade para a proteção da comunida
 * Sentinel-1 para validar a mancha de água sob nuvens.
 * Deep links (`?rain=&days=&lat=&lng=`) e Web Share para WhatsApp.
 * Ligar `hazard_pins` do PostGIS ao mapa.
+* Fila offline para enviar demarcações ao Supabase quando a rede voltar.
 * LiDAR municipal (1 m) no lugar do GLO-30 onde existir.
 
 ---

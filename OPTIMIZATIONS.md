@@ -15,7 +15,9 @@ Na imagem, o platô é alto e o lote vizinho é mais baixo. No GLO-30:
 * o pixel do aterro **continua baixo** (a obra não entrou no catálogo);
 * o vizinho sem aterro, mas com **casa ou árvore**, pode aparecer **mais alto** (o GLO-30 é um modelo de *superfície*, DSM: telhado e copa entram na altitude).
 
-A água sobe pelas células **mais baixas no DEM**. Resultado típico: o heatmap pinta o aterro (ainda “fundo de vale” no modelo) **antes** do entorno que, na vida real, é o primeiro a alagar.
+A água sobe pelas células **mais baixas no DEM**. Sem correção, o heatmap pinta o aterro (ainda “fundo de vale” no modelo) **antes** do entorno que, na vida real, é o primeiro a alagar.
+
+A demarcação de relevo no app **não torna o GLO-30 um levantamento**. Ela só diz: “neste polígono, some Δz ao satélite antigo”. Isso ameniza o atraso do catálogo **quando a obra é maior que o ruído vertical** (2–4 m). Um Δz de 0,3 m some no DSM; +2 m de platô, não.
 
 Outras fontes de erro, mesmo sem obra nova:
 
@@ -54,15 +56,26 @@ z_usado = z_Copernicus + Δz_local
 
 Para o aterro do exemplo, `Δz_local ≈ +2 m` no polígono do lote. O flood-fill passa a ver o platô alto e enche **primeiro o entorno baixo**.
 
-Cadência útil: **quando a obra termina** (ou quando a Defesa Civil avisa), não um cron que “refaz o vale” às 6h.
+O que a marcação **melhora** na validade dos dados:
+
+| Limite do GLO-30 | O que o polígono faz | O que ele não faz |
+| --- | --- | --- |
+| Catálogo atrasado (anos) | Recoloca a obra no modelo **no mesmo dia** | Não atualiza o satélite; é um adendo |
+| Pixel de 30 m | Aplica Δz em todas as células cujo **centro** cai no polígono | Não desenha o meio-fio nem o talude real |
+| Erro vertical 2–4 m | Ajuda se o Δz for **claro** (aterro de metros). Vários relatores: média de Δz (1 voto por pessoa); amplitude ≥ 1 m pinta o sítio de vermelho | Não vira GNSS. Olho + foto: típico ±0,5–1 m |
+| DSM (telhado/copa) | Nada | Casa ao lado do pátio continua “alta” no DEM |
+| Aterro no leito | O **talvegue** (cota d’água) usa o GLO-30 **cru**; o Δz não sobe o rio | Se o polígono for pequeno diante da mancha, o volume deslocado quase não se vê |
+| DEM futuro já “comeu” a obra | Compara a cota atual com a gravada na criação; **absorvido** deixa de somar Δz (evita contar duas vezes) | Absorção usa a mesma malha ruidosa: em dúvida, “somar mesmo assim” |
+
+Cadência útil: **quando a obra termina** (ou quando a Defesa Civil avisa), não um cron que “refaz o vale” às 6h. **Validação in loco** (papel validador no banco) é o que transforma chute de relator em dado conferido — o app só agrupa sobreposições e denuncia divergência de altura.
 
 ### 1. Patch imediato (chute explícito)
 
-* Polígono no mapa ou GeoJSON: *este lote = +2,0 m*, data, fonte (“morador”, “prefeitura”).
-* Vertical típica: **±0,5–1 m** se for olho + foto.
-* Encaixa na ideia dos **pins comunitários** (PostGIS / `hazard_pins`): “aterro +2 m aqui”, *provisório* até validação.
+* Polígono no mapa: *este lote = +2,0 m*, nome, relator, data.
+* Vertical típica sem instrumento: **±0,5–1 m** (olho + foto).
+* Vários moradores no mesmo sítio: o modelo usa a **média de Δz**, não a soma, e ignora diferença pequena de área.
 
-Mínimo que já melhoraria o ponto 27.26440° S, 48.82210° O.
+Isso já melhoraria o ponto 27.26440° S, 48.82210° O, desde que o Δz seja da ordem dos 2 m — não um “ajuste fino” abaixo do ruído do DEM.
 
 ### 2. Medição (quando existir)
 
@@ -72,30 +85,31 @@ Mínimo que já melhoraria o ponto 27.26440° S, 48.82210° O.
 | Drone (fotogrametria) | ~10–30 cm | bairro depois de enchente ou obra |
 | LiDAR municipal | ~5–15 cm | “verdade” da calha e terraços |
 
-O GeoTIFF local **substitui ou soma** no recorte; o resto da bacia continua GLO-30.
+O GeoTIFF local **substitui ou soma** no recorte; o resto da bacia continua GLO-30. A demarcação no app é o paliativo até existir essa malha.
 
 ### 3. Satélite como *detecção de mudança*, não como relevo
 
 * **Sentinel-2 / imagens óticas:** “aqui nasceu um platô” → alguém mede ou desenha o polígono.
 * **Sentinel-1:** mancha de água real sob tempestade, para **validar** o heatmap, não para esculpir o aterro.
 
-### 4. Encaixe no repositório (implementado no dashboard)
+### 4. O que o dashboard já faz
 
-1. GeoJSON canônico: `backend-satellite/topo_patches/patches.geojson` (servido em `/topo_patches.geojson`).
-2. No mapa: **Demarcar área** → cliques nos vértices → informar **Δz** (ex. +2 m de aterro, não a cota absoluta) → **Aplicar Δz**.
-3. O cliente soma o delta na malha Copernicus (`copernicusDem.ts`) antes do hillshade e do flood-fill.
-4. Correções deste browser ficam no `localStorage`; **Baixar GeoJSON** para versionar no repositório.
-5. Pins verificados no PostGIS continuam o passo seguinte (ainda não ligados).
+1. Aba **Ferramentas** (login/cadastro obrigatório para corrigir). **Demarcar área** (conta relator): vértices no mapa, Δz relativo, fechar no primeiro ponto / Enter. Área em m² na barra.
+2. **Simular inundação com correções** (depois do login): soma o Δz no hillshade e no heatmap mesmo sem validação institucional. Desligado = GLO-30 puro. Não é parecer da Defesa Civil. Sem conta, a aba só mostra o formulário; a régua fica em **Simulação**.
+3. Cliente: `z_usado` em `copernicusDem.ts` **antes** do hillshade e do flood-fill. Talvegue em `inundation.ts` no DEM **cru**. Volume que não cabe mais no platô **sobe a lâmina no entorno**.
+4. **Minhas / todas as marcações:** consenso por sobreposição (IoU). Pacote versionado: `regions/<id>.patches.geojson`. Com Supabase: tabela `topo_patch_reports` (GeoJSON + Δz + usuário) assim que aplica. Sem banco: `localStorage`. **Baixar GeoJSON** é só cópia de segurança.
+5. **Absorção** quando o GLO-30 já refletiu a obra. Validador/admin: **validar in loco**.
+6. Pins de foto (`hazard_pins`) continuam **outro** fluxo (ainda não no mapa) — não confundir com o polígono de Δz.
 
-Ponto natural de configuração: `regions/<id>.patches.geojson` e/ou `backend-database/migrations.sql` (geometria versionada).
+O caminho antigo `backend-satellite/topo_patches/patches.geojson` foi substituído pelos pacotes em `regions/` e, em produção, pelo banco.
 
 ---
 
 ## Prioridade sugerida
 
-1. **Documentar o limite na UI** (já há aviso no cartão do ponteiro: aterro recente pode não estar no relevo).
-2. **Patches poligonais +Δz** para obras conhecidas (maior ganho / menor custo).
+1. **Documentar o limite na UI** (sonda, HUD da simulação hipotética, nota de absorção).
+2. **Patches poligonais + Δz** nas obras conhecidas — maior ganho / menor custo, **se** o delta for maior que o ruído do DEM; vários relatos + in loco melhoram a confiança no número, não na malha de 30 m.
 3. **LiDAR ou drone** nos trechos críticos (SJB, Canelinha, terraços aterrados).
 4. **Sentinel-1** para confrontar mancha real × mancha simulada, não para DEM diário.
 
-Enquanto não houver patch, o modelo permanece honesto **com o satélite antigo** e visivelmente defasado **com a rua de hoje**. Isso deve ser dito ao cidadão: paz de espírito inclui saber **o que o mapa não sabe**.
+Sem patch, o modelo permanece honesto **com o satélite antigo** e visivelmente defasado **com a rua de hoje**. Com patch, ele é honesto **com o satélite mais o que alguém mediu ou chutou no polígono**. Paz de espírito inclui saber **o que o mapa não sabe**.

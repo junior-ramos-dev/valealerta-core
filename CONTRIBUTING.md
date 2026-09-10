@@ -2,6 +2,48 @@
 
 Seja bem-vindo ao projeto **Vale Alerta**. O motor (Copernicus DEM, Open-Meteo, flood-fill, régua, patches) é genérico. Cada bacia é um **pacote de região** em JSON — não é preciso alterar React para incluir um vale novo, desde que o JSON esteja completo e calibrado.
 
+Há dois jeitos de ajudar: **demarcar obras de terra no mapa** (qualquer relator cadastrado) e **adicionar ou calibrar uma bacia** (JSON + PR). O primeiro melhora a mancha **já amanhã**; o segundo escala o app para outro vale.
+
+## ⛰️ Demarcar relevo modificado (aterro ou escavação)
+
+O heatmap usa o **Copernicus GLO-30**, que atrasa **anos** e mistura telhado/copa com o chão. Aterro, corte, dique e loteamento recente **não entram** no satélite. Sem correção, a água pinta o platô antigo (ainda “baixo” no modelo) e poupa o vizinho que, na rua, é quem alaga.
+
+Quem vive no lugar pode **somar um Δz só no polígono da obra**:
+
+```text
+z_usado = z_Copernicus + Δz
+```
+
+Isso não vira GNSS nem parecer da Defesa Civil. Ajuda a simulação se a marcação ficar **o mais perto possível da área real e da altura (ou profundidade) real**. Detalhes de limite: `OPTIMIZATIONS.md`.
+
+### Cadastrar
+
+1. Abra o dashboard (`npm run dev` ou o host em produção).
+2. Na barra, aba **Ferramentas** (a aba **Simulação** guarda régua, bacia e chuva).
+3. Sem login, a aba mostra o aviso de que correções exigem cadastro e o formulário **Entrar | Cadastrar**.
+4. **Com banco (Supabase):** em **Cadastrar**, informe nome, cidade/estado onde reside, **bacia** e **município padrão** ao abrir o app, e-mail e senha (papel relator). Peça a um admin se precisar ser validador. Em **Entrar**, só e-mail e senha.
+5. **Sem banco:** **Cadastrar** ou **Entrar** com nome (2+ letras) + senha `123` — os polígonos ficam só neste navegador até existir projeto Supabase. Os padrões de bacia/cidade gravam neste aparelho.
+
+### Como demarcar (área × altura)
+
+1. **Demarcar área** e clique os vértices **colados no platô, no corte ou no dique** — não um retângulo “para caber o bairro”. O modelo aplica o Δz em cada célula de ~30 m cujo **centro** cai no polígono: folga demais aterra o vizinho; folga de menos deixa um corredor baixo falso.
+2. Feche no **primeiro ponto** (verde), com duplo clique ou Enter. Confira a **área em m²** na barra (e o equivalente em campos de futebol **em área**, não em comprimento).
+3. **Δz em metros**, relativo, não cota MSL:
+   * aterro / platô: **positivo** (ex. +2 m);
+   * escavação / corte: **negativo**.
+4. Use a altura **da obra**, não um “ajuste fino”. O GLO-30 já erra **2–4 m** na vertical: um chute de 0,3 m some no ruído; **+2 m de platô** muda a mancha. Se a prefeitura mediu, use essa cota.
+5. **Aplicar Δz**. Ligue **Simular inundação com correções de relevo** para ver a água sair do platô (o rio continua no GLO-30 cru; o volume que não cabe no aterro sobe a lâmina no entorno).
+
+Vários relatores no mesmo sítio: o app **média o Δz** (um voto por pessoa). Área um pouco maior ou menor não desfaz o grupo; **altura** discordando ≥ 1 m fica vermelha até alguém conferir in loco.
+
+### O que não fazer
+
+- Inventar ANA, cota de transbordo ou “6 m de SJB” noutro município (`CONTRIBUTING.md` da bacia).
+- Polígono enorme “para garantir” ou Δz redondo demais sem olhar a obra.
+- Tratar a simulação hipotética como aviso oficial.
+
+Quem puder validar no campo (papel **validador**): botão **validar in loco** na lista. Patches canônicos da bacia (já conferidos) entram em `regions/<id>.patches.geojson` via PR.
+
 ## 🌍 Como adicionar uma nova bacia
 
 1. Copie `regions/tijucas.json` para `regions/<id>.json` (id em minúsculas, sem espaços: `itajai`, `itajaí` não). Copie também `regions/tijucas.patches.geojson` para `regions/<id>.patches.geojson` (pode começar vazio).
@@ -46,8 +88,8 @@ VALEALERTA_REGION=itajai python3 backend-satellite/fetch_hydro.py
 
 Arquivos opcionais:
 
-- `regions/<id>.patches.geojson` — correções Δz canônicas (aterros) daquela bacia.
-- Patches desenhados no browser ficam em `localStorage` **por região** (`valealerta-topo-patches:<id>`).
+- `regions/<id>.patches.geojson` — correções Δz **já conferidas** daquela bacia (versionadas no git).
+- Relatos do mapa: tabela `topo_patch_reports` no Supabase, ou `localStorage` (`valealerta-topo-patches:<id>`) sem banco.
 
 ### O que não copiar de outra bacia
 
@@ -64,6 +106,7 @@ Pacote de exemplo já no repositório: **`regions/itajai.json`** (Vale do Itaja�
 Como esta é uma ferramenta de utilidade pública, **nenhuma mancha nova ou mudança da fórmula entra em `main` sem validação**.
 
 * PRs que alteram física da água ou inserem bacia/município pedem revisão (geógrafos, hidrólogos, Defesa Civil).
+* Demarcações de relator no app **não** entram em `main` sozinhas: melhoram a simulação local/banco até alguém promover o GeoJSON canônico ou validar in loco.
 * A configuração deve ser testada contra um evento real (ex.: Tijucas 2022/2024; Itajaí 2008/2011). Se o slider na cota máxima cobrir a mancha documentada pelo município, o modelo pode ser marcado `calibrated`.
 
 Obrigado por ajudar a democratizar a alfabetização climática e proteger vidas.

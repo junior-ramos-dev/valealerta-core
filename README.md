@@ -12,4 +12,6 @@
 
 * **Como contribuir com o projeto ou adicionar novas regiões: [CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-* **PWA (instalação em desenvolvimento/produção e uso online/offline): [PWA.md](PWA.md)**.
+* **PWA (instalação em computador ou celular, uso online/offline): [PWA.md](PWA.md)**.
+
+* **Contas, papéis e demarcações de relevo:** projeto Supabase + `backend-database/migrations.sql`; o dashboard lê e grava polígonos na tabela assim que o relator aplica o Δz (ver [frontend-dashboard/README.md](frontend-dashboard/README.md)).
