@@ -1,29 +1,32 @@
 /** Placeholder auth until Vale Alerta has a real login. */
 
-export const DUMMY_USERNAME = "usuario";
 export const DUMMY_PASSWORD = "123";
 
 const SESSION_KEY = "valealerta-dummy-auth";
 
-export function readDummySession(): boolean {
+export function readDummyUsername(): string | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY) === DUMMY_USERNAME;
+    const name = sessionStorage.getItem(SESSION_KEY);
+    return name && name.trim() ? name.trim() : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function tryDummyLogin(username: string, password: string): boolean {
-  const ok =
-    username.trim() === DUMMY_USERNAME && password === DUMMY_PASSWORD;
-  if (ok) {
-    try {
-      sessionStorage.setItem(SESSION_KEY, DUMMY_USERNAME);
-    } catch {
-      /* ignore quota / private mode */
-    }
+export function readDummySession(): boolean {
+  return readDummyUsername() != null;
+}
+
+/** Qualquer nome + senha 123, para simular vários relatores neste aparelho. */
+export function tryDummyLogin(username: string, password: string): string | null {
+  const name = username.trim();
+  if (name.length < 2 || password !== DUMMY_PASSWORD) return null;
+  try {
+    sessionStorage.setItem(SESSION_KEY, name);
+  } catch {
+    /* ignore quota / private mode */
   }
-  return ok;
+  return name;
 }
 
 export function dummyLogout(): void {

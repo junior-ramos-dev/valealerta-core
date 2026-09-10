@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type FormEvent } from "react";
-import { tryDummyLogin } from "./dummyAuth";
+import { isDatabaseEnabled, loginAppUser, signUpAppUser } from "./auth";
 
 const fieldStyle: CSSProperties = {
   width: "100%",
@@ -12,19 +12,37 @@ const fieldStyle: CSSProperties = {
   fontSize: 12,
 };
 
-export function PatchLoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [username, setUsername] = useState("");
+export function PatchLoginForm({
+  onLoggedIn,
+}: {
+  onLoggedIn: (name: string, userId: string, role: string) => void;
+}) {
+  const db = isDatabaseEnabled();
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const finish = async (mode: "in" | "up") => {
+    setBusy(true);
+    setError(null);
+    try {
+      const user =
+        mode === "up"
+          ? await signUpAppUser(identifier, password, displayName || identifier)
+          : await loginAppUser(identifier, password);
+      onLoggedIn(user.name, user.id, user.role);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha no login.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!tryDummyLogin(username, password)) {
-      setError("Usuário ou senha inválidos.");
-      return;
-    }
-    setError(null);
-    onLoggedIn();
+    void finish("in");
   };
 
   return (
@@ -33,16 +51,29 @@ export function PatchLoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
       <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}>
-        Demarcar aterro exige autorização. Entre com a conta provisória.
+        {db
+          ? "Entre com e-mail e senha da conta Vale Alerta. As demarcações gravam no banco na hora."
+          : "Banco não configurado (VITE_SUPABASE_URL). Modo local: nome + senha 123."}
       </p>
+      {db && (
+        <label style={{ fontSize: 11, color: "#aaa" }}>
+          Nome (só na criação da conta)
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            style={{ ...fieldStyle, marginTop: 4 }}
+          />
+        </label>
+      )}
       <label style={{ fontSize: 11, color: "#aaa" }}>
-        Usuário
+        {db ? "E-mail" : "Usuário"}
         <input
-          type="text"
+          type={db ? "email" : "text"}
           name="username"
           autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
           style={{ ...fieldStyle, marginTop: 4 }}
         />
       </label>
@@ -62,19 +93,39 @@ export function PatchLoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
       )}
       <button
         type="submit"
+        disabled={busy}
         style={{
           background: "#0077b6",
           border: "1px solid #00b4d8",
           color: "#fff",
           borderRadius: 6,
           padding: "8px 10px",
-          cursor: "pointer",
+          cursor: busy ? "wait" : "pointer",
           fontSize: 12,
           fontWeight: 700,
         }}
       >
         Entrar para demarcar
       </button>
+      {db && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void finish("up")}
+          style={{
+            background: "#2d2d2d",
+            border: "1px solid #444",
+            color: "#fff",
+            borderRadius: 6,
+            padding: "8px 10px",
+            cursor: busy ? "wait" : "pointer",
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          Criar conta
+        </button>
+      )}
     </form>
   );
 }

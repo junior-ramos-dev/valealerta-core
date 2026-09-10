@@ -410,6 +410,7 @@ export async function loadCopernicusTopoOverlay(
   viewBbox: LonLatBBox,
   signal?: AbortSignal,
   patches: TopoPatchFeature[] = [],
+  options?: { forceAllPatches?: boolean },
 ): Promise<CopernicusTopoOverlay> {
   const view = normalizeBbox(viewBbox);
   // Malha maior que o viewport (~2 km) para o flood-fill não cortar o rio na borda.
@@ -444,7 +445,9 @@ export async function loadCopernicusTopoOverlay(
     width,
     height,
     work,
-    patchesToApply(patches, patchChecks),
+    options?.forceAllPatches
+      ? patches.filter((p) => Number.isFinite(p.properties.delta_m) && p.properties.delta_m !== 0)
+      : patchesToApply(patches, patchChecks),
   );
 
   const hillshade = renderHillshade(elevations, width, height, work);

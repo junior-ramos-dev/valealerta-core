@@ -59,6 +59,8 @@ export type HydroSnapshot = {
 
 /** Shortest upstream burst used to translate inland depth → rainfall intensity. */
 export const CRITICAL_RAIN_H = 3;
+/** Near-term Open-Meteo walk: next 12 hourly steps from “now”. */
+export const NEAR_FORECAST_H = 12;
 
 export const HYDRO_TZ = "America/Sao_Paulo";
 
@@ -406,6 +408,21 @@ export function rainForForecastDays(snapshot: HydroSnapshot | null, days: number
   return rainForHorizon(snapshot, hours);
 }
 
+/** Mean upstream precipitation per Open-Meteo hour (mm in that hour ≈ mm/h). */
+export function upstreamHourlyMm(
+  snapshot: HydroSnapshot | null,
+  hours: number = NEAR_FORECAST_H,
+): number[] {
+  const n = Math.max(0, Math.round(hours));
+  if (!snapshot || n === 0) return [];
+  const cities = upstreamRain(snapshot.rainfall);
+  const rows = cities.length ? cities : snapshot.rainfall;
+  if (!rows.length) return Array.from({ length: n }, () => 0);
+  return Array.from({ length: n }, (_, h) =>
+    round2(rows.reduce((sum, city) => sum + (city.hourly_mm[h] ?? 0), 0) / rows.length),
+  );
+}
+
 export function grossRainForHorizon(snapshot: HydroSnapshot | null, hours: number): number {
   if (!snapshot) return 0;
   return meanUpstreamMetric(snapshot, (r) => grossRainMm(r.hourly_mm, hours));
@@ -420,15 +437,23 @@ export function grossRainForForecastDays(snapshot: HydroSnapshot | null, days: n
  * Cota prevista (m acima do leito) = régua atual (ANA ou slider) + ΔH da chuva efetiva.
  * 32 mm × 0,05 = +1,6 m na régua, não 32 cm de água no mapa.
  */
+export function forecastStaffFromHours(
+  snapshot: HydroSnapshot | null,
+  hours: number,
+  baselineCm?: number,
+): number {
+  const rainMm = rainForHorizon(snapshot, hours);
+  const currentM =
+    (baselineCm ?? snapshot?.gauge_stage_cm ?? getRegion().hydro.normal_stage_cm) / 100;
+  return Math.max(0, currentM + rainMm * rainCoeff());
+}
+
 export function forecastStaffM(
   snapshot: HydroSnapshot | null,
   days: number,
   baselineCm?: number,
 ): number {
-  const rainMm = rainForForecastDays(snapshot, days);
-  const currentM =
-    (baselineCm ?? snapshot?.gauge_stage_cm ?? getRegion().hydro.normal_stage_cm) / 100;
-  return Math.max(0, currentM + rainMm * rainCoeff());
+  return forecastStaffFromHours(snapshot, forecastHorizonHours(days), baselineCm);
 }
 
 function saoPauloYmd(from: Date): { y: number; m: number; d: number } {
@@ -486,6 +511,12 @@ export function forecastHorizonLabel(days: number, from = new Date()): string {
 
 export function todayHorizonLabel(from = new Date()): string {
   return formatWeekdayDatePt(horizonDate(0, from));
+}
+
+/** Clock in São Paulo for Open-Meteo step 1 = current hour. */
+export function forecastHourClock(step: number, from = new Date()): string {
+  const hour = (saoPauloHour(from) + Math.max(0, Math.round(step) - 1)) % 24;
+  return `${String(hour).padStart(2, "0")}h`;
 }
 
 /** Buffer ao longo do talvegue (legado/debug): largura ≈ ΔH × ocupação do trecho. */

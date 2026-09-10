@@ -24,13 +24,17 @@ import {
   grossRainForHorizon,
   rainMmPerHourForInlandCm,
   forecastStaffM,
+  forecastStaffFromHours,
   floodOccupancy,
   effectiveRainMm,
   riverLineGeoJSON,
   CRITICAL_RAIN_H,
+  NEAR_FORECAST_H,
   forecastHorizonLabel,
   forecastHorizonHours,
   todayHorizonLabel,
+  forecastHourClock,
+  upstreamHourlyMm,
   type HydroSnapshot,
 } from "./hydro";
 import {
@@ -43,6 +47,7 @@ import {
   staffForCity,
   storeRegionId,
   surgeLagH,
+  tryGetRegion,
   type RegionCatalog,
   type RegionPack,
 } from "./region";
@@ -61,18 +66,36 @@ import {
   loadDeletedPatchIds,
   saveDeletedPatchIds,
   drawPointsFromPatch,
+  formatAreaM2,
   makeLocalPatch,
   meanElevationInPatch,
   mergePatchChecks,
   mergePatches,
   patchesContentKey,
   patchesToCollection,
+  patchAreaM2,
+  patchesForMapView,
+  polygonAreaM2,
   saveLocalPatches,
+  type PatchMapView,
   type TopoPatchFeature,
 } from "./topoPatches";
 import { SidebarDock, SidebarSection } from "./SidebarSection";
 import { PatchLoginForm } from "./PatchLoginForm";
-import { dummyLogout, readDummySession } from "./dummyAuth";
+import {
+  logoutAppUser,
+  restoreAppUser,
+  type AppRole,
+} from "./auth";
+import {
+  deleteRemotePatch,
+  fetchRemotePatches,
+  listProfiles,
+  setRemoteProfileRole,
+  upsertRemotePatch,
+  validateRemotePatch,
+} from "./patchApi";
+import { isDatabaseEnabled } from "./supabaseClient";
 import "./App.css";
 
 function depthLabelColor(rgba: [number, number, number, number]): string {
@@ -105,6 +128,40 @@ function patchDemCaption(p: {
     return `Copernicus já inclui o Δz — não somado${zBit}`;
   if (status === "review") return `DEM mudou de outro jeito — conferir${zBit}`;
   return `ativo no modelo${zBit}`;
+}
+
+const DRAFT_PATCH_ID = "valealerta-draft";
+
+function draftReliefPatch(
+  points: [number, number][],
+  deltaM: number,
+): TopoPatchFeature | null {
+  const patch = makeLocalPatch(
+    points,
+    deltaM,
+    "Rascunho (não validado)",
+    DRAFT_PATCH_ID,
+  );
+  if (!patch) return null;
+  patch.properties.force_active = true;
+  return patch;
+}
+
+function overlayPatchesForDem(
+  saved: TopoPatchFeature[],
+  whatIf: boolean,
+  drawPoints: [number, number][],
+  deltaM: number,
+  view: PatchMapView,
+  username: string | null,
+  userId: string | null,
+): TopoPatchFeature[] {
+  if (!whatIf) return [];
+  const list = patchesForMapView(saved, view, username, userId).filter(
+    (p) => p.properties.id !== DRAFT_PATCH_ID,
+  );
+  const draft = draftReliefPatch(drawPoints, deltaM);
+  return draft ? [...list, draft] : list;
 }
 
 type MapProbe = {
@@ -230,7 +287,9 @@ export default function App() {
   const [regionError, setRegionError] = useState<string | null>(null);
 
   const [timeWindow, setTimeWindow] = useState<number>(4);
-  const [forecastDays, setForecastDays] = useState<number>(3);
+  const [forecastDays, setForecastDays] = useState<number>(1);
+  const [rainHours, setRainHours] = useState<number>(1);
+  const [forecastWindow, setForecastWindow] = useState<"hours" | "days">("days");
   const [heatmapMode, setHeatmapMode] = useState<"now" | "forecast">("now");
   const [topoOpacity, setTopoOpacity] = useState<number>(45);
   const [topoStatus, setTopoStatus] = useState<
@@ -266,21 +325,43 @@ export default function App() {
     () => {},
   );
   const drawPointsRef = useRef<[number, number][]>([]);
+  const patchDeltaMRef = useRef(2);
+  const patchNameRef = useRef("");
+  const editingPatchIdRef = useRef<string | null>(null);
+  const commitDrawnPatchRef = useRef<() => boolean>(() => false);
+  const reliefWhatIfRef = useRef(false);
+  const patchViewRef = useRef<PatchMapView>("mine");
+  const usernameRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
   const patchesRef = useRef<TopoPatchFeature[]>([]);
   const patchesHydratedRef = useRef(false);
   const patchesDemKeyRef = useRef<string | null>(null);
   const [patches, setPatches] = useState<TopoPatchFeature[]>([]);
+  const [reliefWhatIf, setReliefWhatIf] = useState(false);
   const [drawingPatch, setDrawingPatch] = useState(false);
   const [drawPoints, setDrawPoints] = useState<[number, number][]>([]);
   const [editingPatchId, setEditingPatchId] = useState<string | null>(null);
   const [deletedPatchIds, setDeletedPatchIds] = useState<string[]>([]);
   const [patchDeltaM, setPatchDeltaM] = useState(2);
   const [patchName, setPatchName] = useState("");
-  const [canEditPatches, setCanEditPatches] = useState(readDummySession);
+  const [canEditPatches, setCanEditPatches] = useState(false);
+  const [patchUsername, setPatchUsername] = useState<string | null>(null);
+  const [patchUserId, setPatchUserId] = useState<string | null>(null);
+  const [patchRole, setPatchRole] = useState<AppRole>("reporter");
+  const [userList, setUserList] = useState<
+    { id: string; display_name: string; role: AppRole }[]
+  >([]);
+  const [patchView, setPatchView] = useState<PatchMapView>("mine");
+  const [spillRedistrib, setSpillRedistrib] = useState<{
+    wseLiftM: number;
+    displacedM3: number;
+  } | null>(null);
   const topoOpacityRef = useRef(topoOpacity);
   const waterLevelCmRef = useRef(waterLevelCm);
   const heatmapModeRef = useRef(heatmapMode);
   const forecastDaysRef = useRef(forecastDays);
+  const rainHoursRef = useRef(rainHours);
+  const forecastWindowRef = useRef(forecastWindow);
   const timeWindowRef = useRef(timeWindow);
   const hydroRef = useRef(hydro);
   const liveRiverRef = useRef(liveRiver);
@@ -374,11 +455,17 @@ export default function App() {
       // Agora: régua. Previsão: régua (piso ANA) + chuva efetiva × coeff.
       const staffM =
         heatmapModeRef.current === "forecast"
-          ? forecastStaffM(
-              hydroRef.current,
-              forecastDaysRef.current,
-              waterLevelCmRef.current,
-            )
+          ? forecastWindowRef.current === "hours"
+            ? forecastStaffFromHours(
+                hydroRef.current,
+                rainHoursRef.current,
+                waterLevelCmRef.current,
+              )
+            : forecastStaffM(
+                hydroRef.current,
+                forecastDaysRef.current,
+                waterLevelCmRef.current,
+              )
           : waterLevelCmRef.current / 100;
       // Só o excesso sobre o transbordo vira lâmina no DEM (evita 5 m ANA = 2 m de rua).
       const extraAboveSpillM = Math.max(0, staffM - spillStageMRef.current);
@@ -388,7 +475,7 @@ export default function App() {
       );
       // Sementes só no braço da cidade; extraAboveSpillM = 0 → sem mancha nas ruas.
       try {
-        const image = await renderSpillHeatmap(
+        const { canvas: image, wseLiftM, displacedM3 } = await renderSpillHeatmap(
           dem.elevations,
           dem.width,
           dem.height,
@@ -398,10 +485,17 @@ export default function App() {
           false,
           dem.viewBbox,
           branchIds,
+          dem.rawElevations,
+          reliefWhatIfRef.current,
         );
         if (!mapRef.current) return;
         if (topoOverlayRef.current !== dem) return;
         applyInundationOverlay(map, image, bboxToCoordinates(dem.bbox));
+        setSpillRedistrib(
+          reliefWhatIfRef.current && (wseLiftM > 0.0005 || displacedM3 > 1)
+            ? { wseLiftM, displacedM3 }
+            : null,
+        );
       } catch (error) {
         console.error(error);
       }
@@ -474,11 +568,14 @@ export default function App() {
     reguaTouchedRef.current = false;
     setTimeWindow(Math.max(1, Math.min(12, Math.round(surgeLagH(pack)))));
     setForecastDays(1);
+    setRainHours(1);
+    setForecastWindow("days");
     setHeatmapMode("now");
     setHydro(null);
     patchesHydratedRef.current = false;
     setPatches([]);
     setDeletedPatchIds([]);
+    setReliefWhatIf(false);
   };
 
   const switchRegion = (id: string) => {
@@ -562,7 +659,16 @@ export default function App() {
         }
       }
       const bbox = bboxFromViewport(map);
-      const demKey = `${bbox.west.toFixed(5)},${bbox.south.toFixed(5)},${bbox.east.toFixed(5)},${bbox.north.toFixed(5)}|${patchesContentKey(patchesRef.current)}`;
+      const overlayPatches = overlayPatchesForDem(
+        patchesRef.current,
+        reliefWhatIfRef.current,
+        drawPointsRef.current,
+        patchDeltaMRef.current,
+        patchViewRef.current,
+        usernameRef.current,
+        userIdRef.current,
+      );
+      const demKey = `${bbox.west.toFixed(5)},${bbox.south.toFixed(5)},${bbox.east.toFixed(5)},${bbox.north.toFixed(5)}|${patchesContentKey(overlayPatches)}|w${reliefWhatIfRef.current ? 1 : 0}`;
       if (demKey === inFlightDemKey) return;
       abort.abort();
       abort = new AbortController();
@@ -572,13 +678,15 @@ export default function App() {
       setTopoStatus("loading");
       setTopoMeta("Atualizando relevo e transbordo para a vista…");
 
-      loadCopernicusTopoOverlay(bbox, signal, patchesRef.current)
+      loadCopernicusTopoOverlay(bbox, signal, overlayPatches, {
+        forceAllPatches: reliefWhatIfRef.current,
+      })
         .then(async (overlay) => {
           if (gen !== fetchGen || signal.aborted) return;
           topoOverlayRef.current = overlay;
           applyTopoOverlay(map, overlay);
           const bed = estimateChannelThalwegM(
-            overlay.elevations,
+            overlay.rawElevations,
             overlay.width,
             overlay.height,
             overlay.bbox,
@@ -602,10 +710,15 @@ export default function App() {
             return { ...prev, zM: sampleElevationM(overlay, prev.lon, prev.lat) };
           });
           if (gen !== fetchGen) return;
-          setPatches((prev) => mergePatchChecks(prev, overlay.patchChecks));
+          setPatches((prev) =>
+            mergePatchChecks(
+              prev,
+              overlay.patchChecks.filter((c) => c.id !== DRAFT_PATCH_ID),
+            ),
+          );
           setTopoStatus("ready");
           setTopoMeta(
-            `COP-DEM GLO-30 · ${overlay.tileCount} tile${overlay.tileCount === 1 ? "" : "s"} · ${Math.round(overlay.elevationMinM)}–${Math.round(overlay.elevationMaxM)} m`,
+            `COP-DEM GLO-30 · ${overlay.tileCount} tile${overlay.tileCount === 1 ? "" : "s"} · ${Math.round(overlay.elevationMinM)}–${Math.round(overlay.elevationMaxM)} m${reliefWhatIfRef.current ? " · Δz hipotético (não validado)" : ""}`,
           );
           setHeatmapEpochRef.current((n) => n + 1);
         })
@@ -624,7 +737,16 @@ export default function App() {
 
     const scheduleViewportSync = () => {
       const bbox = bboxFromViewport(map);
-      const demKey = `${bbox.west.toFixed(5)},${bbox.south.toFixed(5)},${bbox.east.toFixed(5)},${bbox.north.toFixed(5)}|${patchesContentKey(patchesRef.current)}`;
+      const overlayPatches = overlayPatchesForDem(
+        patchesRef.current,
+        reliefWhatIfRef.current,
+        drawPointsRef.current,
+        patchDeltaMRef.current,
+        patchViewRef.current,
+        usernameRef.current,
+        userIdRef.current,
+      );
+      const demKey = `${bbox.west.toFixed(5)},${bbox.south.toFixed(5)},${bbox.east.toFixed(5)},${bbox.north.toFixed(5)}|${patchesContentKey(overlayPatches)}|w${reliefWhatIfRef.current ? 1 : 0}`;
       if (demKey === inFlightDemKey) return;
       window.clearTimeout(settleTimer);
       setTopoStatus("settling");
@@ -733,8 +855,16 @@ export default function App() {
           type: "fill",
           source: "topo-patches",
           paint: {
-            "fill-color": "#f4d35e",
-            "fill-opacity": 0.28,
+            "fill-color": [
+              "match",
+              ["get", "display_kind"],
+              "diverge",
+              "#e07a5f",
+              "agree",
+              "#7dce82",
+              "#f4d35e",
+            ],
+            "fill-opacity": 0.1,
           },
         },
         "labels-overlay",
@@ -745,8 +875,17 @@ export default function App() {
           type: "line",
           source: "topo-patches",
           paint: {
-            "line-color": "#f4d35e",
+            "line-color": [
+              "match",
+              ["get", "display_kind"],
+              "diverge",
+              "#e07a5f",
+              "agree",
+              "#7dce82",
+              "#f4d35e",
+            ],
             "line-width": 2,
+            "line-opacity": 0.4,
           },
         },
         "labels-overlay",
@@ -770,9 +909,14 @@ export default function App() {
           type: "circle",
           source: "topo-patch-draw",
           paint: {
-            "circle-radius": 7,
-            "circle-color": "#00b4d8",
-            "circle-stroke-width": 1,
+            "circle-radius": ["case", ["==", ["get", "closeTarget"], 1], 12, 7],
+            "circle-color": [
+              "case",
+              ["==", ["get", "closeTarget"], 1],
+              "#b8ff5a",
+              "#00b4d8",
+            ],
+            "circle-stroke-width": 2,
             "circle-stroke-color": "#fff",
           },
         },
@@ -843,27 +987,60 @@ export default function App() {
       followMapCenter();
     });
 
+    const dist2 = (
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+    ) => {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return dx * dx + dy * dy;
+    };
+    const CLOSE_PX = 28;
+
+    const nearFirstVertex = (point: { x: number; y: number }) => {
+      const pts = drawPointsRef.current;
+      if (pts.length === 0) return false;
+      const first = map.project({ lng: pts[0][0], lat: pts[0][1] });
+      return dist2(first, point) <= CLOSE_PX * CLOSE_PX;
+    };
+
     map.on("click", (event) => {
       if (drawingRef.current) {
-        const hits = map.queryRenderedFeatures(event.point, {
-          layers: ["topo-patch-draw-points"],
-        });
-        const raw = hits[0]?.properties?.vertex;
-        const vertex = typeof raw === "number" ? raw : Number(raw);
-        if (Number.isInteger(vertex) && vertex >= 0) {
-          const pts = drawPointsRef.current.filter((_, i) => i !== vertex);
-          drawPointsRef.current = pts;
-          setDrawPoints(pts);
+        const pts = drawPointsRef.current;
+        if (nearFirstVertex(event.point)) {
+          if (pts.length >= 3) commitDrawnPatchRef.current();
           return;
         }
         const next: [number, number] = [event.lngLat.lng, event.lngLat.lat];
-        const pts = [...drawPointsRef.current, next];
-        drawPointsRef.current = pts;
-        setDrawPoints(pts);
+        const added = [...pts, next];
+        drawPointsRef.current = added;
+        setDrawPoints(added);
         return;
       }
       probePinnedRef.current = true;
       applyProbe(event.lngLat.lng, event.lngLat.lat, true, event.point, "pin");
+    });
+
+    map.on("dblclick", (event) => {
+      if (!drawingRef.current) return;
+      event.preventDefault();
+      let pts = drawPointsRef.current;
+      if (pts.length >= 2) {
+        const last = map.project({
+          lng: pts[pts.length - 1][0],
+          lat: pts[pts.length - 1][1],
+        });
+        const prev = map.project({
+          lng: pts[pts.length - 2][0],
+          lat: pts[pts.length - 2][1],
+        });
+        if (dist2(last, prev) <= CLOSE_PX * CLOSE_PX) {
+          pts = pts.slice(0, -1);
+          drawPointsRef.current = pts;
+          setDrawPoints(pts);
+        }
+      }
+      if (drawPointsRef.current.length >= 3) commitDrawnPatchRef.current();
     });
 
     map.on("moveend", followMapCenter);
@@ -897,6 +1074,14 @@ export default function App() {
   }, [forecastDays]);
 
   useEffect(() => {
+    rainHoursRef.current = rainHours;
+  }, [rainHours]);
+
+  useEffect(() => {
+    forecastWindowRef.current = forecastWindow;
+  }, [forecastWindow]);
+
+  useEffect(() => {
     timeWindowRef.current = timeWindow;
   }, [timeWindow]);
 
@@ -907,6 +1092,113 @@ export default function App() {
   useEffect(() => {
     liveRiverRef.current = liveRiver;
   }, [liveRiver]);
+
+  useEffect(() => {
+    patchDeltaMRef.current = patchDeltaM;
+  }, [patchDeltaM]);
+
+  useEffect(() => {
+    patchNameRef.current = patchName;
+  }, [patchName]);
+
+  useEffect(() => {
+    editingPatchIdRef.current = editingPatchId;
+  }, [editingPatchId]);
+
+  useEffect(() => {
+    usernameRef.current = patchUsername;
+  }, [patchUsername]);
+
+  useEffect(() => {
+    userIdRef.current = patchUserId;
+  }, [patchUserId]);
+
+  useEffect(() => {
+    void restoreAppUser().then((user) => {
+      if (!user) return;
+      setCanEditPatches(true);
+      setPatchUsername(user.name);
+      setPatchUserId(user.id);
+      setPatchRole(user.role);
+      if (user.role === "admin") void listProfiles().then(setUserList);
+    });
+  }, []);
+
+  useEffect(() => {
+    patchViewRef.current = patchView;
+    if (mapRef.current?.isStyleLoaded()) refreshViewportRef.current();
+  }, [patchView]);
+
+  const commitDrawnPatch = useCallback((): boolean => {
+    const patch = makeLocalPatch(
+      drawPointsRef.current,
+      patchDeltaMRef.current,
+      patchNameRef.current,
+      editingPatchIdRef.current ?? undefined,
+      usernameRef.current ?? undefined,
+    );
+    if (!patch) return false;
+    const pack = tryGetRegion();
+    const uid = userIdRef.current;
+    const uname = usernameRef.current;
+    if (pack && uid && uname && isDatabaseEnabled()) {
+      void upsertRemotePatch(patch, pack.id, {
+        id: uid,
+        name: uname,
+        role: "reporter",
+        backend: "supabase",
+      }).catch((err: unknown) => console.error(err));
+    }
+    const dem = topoOverlayRef.current;
+    if (dem?.rawElevations) {
+      const z = meanElevationInPatch(
+        dem.rawElevations,
+        dem.width,
+        dem.height,
+        dem.bbox,
+        patch,
+      );
+      if (z != null) patch.properties.baseline_z_m = z;
+    }
+    patch.properties.dem_status = "active";
+    setPatches((prev) => {
+      const without = prev.filter((x) => x.properties.id !== patch.properties.id);
+      return [...without, patch];
+    });
+    setDeletedPatchIds((ids) => ids.filter((id) => id !== patch.properties.id));
+    setDrawingPatch(false);
+    setDrawPoints([]);
+    drawPointsRef.current = [];
+    drawingRef.current = false;
+    setEditingPatchId(null);
+    setPatchName("");
+    return true;
+  }, []);
+
+  commitDrawnPatchRef.current = commitDrawnPatch;
+
+  useEffect(() => {
+    reliefWhatIfRef.current = reliefWhatIf;
+    const map = mapRef.current;
+    if (map?.getLayer("topo-patches-fill")) {
+      map.setPaintProperty(
+        "topo-patches-fill",
+        "fill-opacity",
+        reliefWhatIf ? 0.28 : 0.1,
+      );
+      map.setPaintProperty(
+        "topo-patches-line",
+        "line-opacity",
+        reliefWhatIf ? 1 : 0.4,
+      );
+    }
+    if (map?.isStyleLoaded()) refreshViewportRef.current();
+  }, [reliefWhatIf]);
+
+  useEffect(() => {
+    if (!reliefWhatIf) return;
+    if (mapRef.current?.isStyleLoaded()) refreshViewportRef.current();
+  }, [drawPoints, patchDeltaM]);
 
   useEffect(() => {
     if (!liveRiver) return;
@@ -923,13 +1215,14 @@ export default function App() {
     Promise.all([
       loadBundledPatches(abort.signal, id),
       Promise.resolve(loadLocalPatches(id)),
+      fetchRemotePatches(id),
     ])
-      .then(([bundled, local]) => {
+      .then(([bundled, local, remote]) => {
         if (abort.signal.aborted) return;
         const deleted = loadDeletedPatchIds(id);
         patchesHydratedRef.current = true;
         setDeletedPatchIds(deleted);
-        setPatches(mergePatches(bundled, local, deleted));
+        setPatches(mergePatches(bundled, [...remote, ...local], deleted));
       })
       .catch(() => {
         if (!abort.signal.aborted) {
@@ -951,7 +1244,11 @@ export default function App() {
     patchesRef.current = patches;
     const map = mapRef.current;
     const src = map?.getSource("topo-patches") as GeoJSONSource | undefined;
-    src?.setData(patchesToCollection(patches));
+    src?.setData(
+      patchesToCollection(
+        patchesForMapView(patches, patchView, patchUsername, patchUserId),
+      ),
+    );
     if (!patchesHydratedRef.current || !region) return;
     saveLocalPatches(patches, region.id);
     const key = patchesContentKey(patches);
@@ -960,29 +1257,36 @@ export default function App() {
     patchesDemKeyRef.current = key;
     if (prev === null && key === "") return;
     if (map?.isStyleLoaded()) refreshViewportRef.current();
-  }, [patches]);
+  }, [patches, patchView, patchUsername, patchUserId, region]);
 
   useEffect(() => {
     drawingRef.current = drawingPatch && canEditPatches;
     drawPointsRef.current = drawPoints;
     const map = mapRef.current;
     const src = map?.getSource("topo-patch-draw") as GeoJSONSource | undefined;
-    if (!src) return;
+    if (!src || !map) return;
+    if (drawingPatch && canEditPatches) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
     if (!canEditPatches || !drawingPatch || drawPoints.length === 0) {
       src.setData({ type: "FeatureCollection", features: [] });
       return;
     }
+    const ring =
+      drawPoints.length >= 3 ? [...drawPoints, drawPoints[0]] : drawPoints;
     const line = {
       type: "Feature" as const,
       properties: {},
       geometry: {
         type: "LineString" as const,
-        coordinates: drawPoints,
+        coordinates: ring,
       },
     };
     const dots = drawPoints.map((coordinates, index) => ({
       type: "Feature" as const,
-      properties: { vertex: index },
+      properties: {
+        vertex: index,
+        closeTarget: index === 0 && drawPoints.length >= 3 ? 1 : 0,
+      },
       geometry: { type: "Point" as const, coordinates },
     }));
     src.setData({ type: "FeatureCollection", features: [line, ...dots] });
@@ -1020,6 +1324,10 @@ export default function App() {
           return next;
         });
       }
+      if (event.key === "Enter" && drawPointsRef.current.length >= 3) {
+        event.preventDefault();
+        commitDrawnPatchRef.current();
+      }
       if (event.key === "Escape") {
         setDrawingPatch(false);
         setDrawPoints([]);
@@ -1042,6 +1350,8 @@ export default function App() {
     waterLevelCm,
     heatmapMode,
     forecastDays,
+    rainHours,
+    forecastWindow,
     hydro,
     timeWindow,
     heatmapEpoch,
@@ -1132,6 +1442,18 @@ export default function App() {
   const armLiveFromForecast = () => {
     liveRiverRef.current = true;
     setLiveRiver(true);
+    setForecastWindow("days");
+    const min = liveStageCm(hydro);
+    if (min != null) {
+      waterLevelCmRef.current = Math.max(waterLevelCmRef.current, min);
+      setWaterLevelCm((w) => Math.max(w, min));
+    }
+    setHeatmapMode("forecast");
+  };
+  const armLiveFromHours = () => {
+    liveRiverRef.current = true;
+    setLiveRiver(true);
+    setForecastWindow("hours");
     const min = liveStageCm(hydro);
     if (min != null) {
       waterLevelCmRef.current = Math.max(waterLevelCmRef.current, min);
@@ -1140,11 +1462,20 @@ export default function App() {
     setHeatmapMode("forecast");
   };
   const displayRise = forecastRainMm * hydroCfg.rain_runoff_coeff;
-  const forecastRise = forecastStaffM(
-    hydro,
-    forecastDays,
-    waterLevelEffectiveCm,
-  );
+  const hourlyNear = upstreamHourlyMm(hydro, NEAR_FORECAST_H);
+  const hourMm = hourlyNear[rainHours - 1] ?? 0;
+  const hourGrossMm = grossRainForHorizon(hydro, rainHours);
+  const hourEffMm = rainForHorizon(hydro, rainHours);
+  const hourRiseM = hourEffMm * hydroCfg.rain_runoff_coeff;
+  const hourStack = hourlyNear
+    .slice(0, rainHours)
+    .map((mm) => mm.toFixed(0))
+    .join(" + ");
+  const dayStaffM = forecastStaffM(hydro, forecastDays, waterLevelEffectiveCm);
+  const forecastRise =
+    forecastWindow === "hours"
+      ? forecastStaffFromHours(hydro, rainHours, waterLevelEffectiveCm)
+      : dayStaffM;
   const targetOccupancy = floodOccupancy(timeWindow, 0);
   const surge = cities.find((c) => c.id === region.surge_city_id);
   const legendMmhExample = rainMmPerHourForInlandCm(
@@ -1431,6 +1762,8 @@ export default function App() {
               reguaTouchedRef.current = false;
               setTimeWindow(Math.max(1, Math.min(12, Math.round(surgeLagH(region)))));
               setForecastDays(1);
+              setRainHours(1);
+              setForecastWindow("days");
               setHeatmapMode("now");
             }}
             style={{
@@ -1732,10 +2065,10 @@ export default function App() {
         </SidebarSection>
 
         <SidebarSection
-          id="acumulo"
-          slot="peek"
-          title="Acúmulo previsto (Open-Meteo)"
-          help={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um (ex.: terça 8 → segunda 14). Arrastar liga Tempo Real e pinta o heatmap Previsão. A chuva efetiva (mm) sobe a régua em mm × ${hydroCfg.rain_runoff_coeff} — 32 mm ≈ +1,6 m na cota, não 32 cm nem 2 m de rua. A mancha só aparece quando a cota prevista passa do transbordo deste município. Sem a cota ao vivo, a mancha pode parecer leve se o rio já estiver cheio. Meia-vida do balde: ${hydroCfg.rain_storage_halflife_h} h.`}
+          id="chuva-12h"
+          slot="more"
+          title="Próximas 12 h (hora a hora)"
+          help="Doze passos da série Open-Meteo a montante: 1 = esta hora (fuso de São Paulo), 12 = daqui a 11 h. O número grande é mm naquela hora (≈ mm/h se chover o bloco inteiro). O acumulado soma as horas 1…N (ex.: 20 mm/h nas duas primeiras e +10 mm na terceira = 50 mm). A subida da régua usa chuva efetiva × coeficiente da bacia. Arrastar liga Tempo Real e pinta o heatmap Previsão nesta janela — o slider de 7 dias é outro horizonte."
         >
         <div
           style={{
@@ -1745,11 +2078,103 @@ export default function App() {
             padding: "10px",
             borderRadius: 8,
             border:
-              heatmapMode === "forecast"
+              heatmapMode === "forecast" && forecastWindow === "hours"
                 ? "1px solid #3ecf4c"
                 : "1px solid #333",
             background:
-              heatmapMode === "forecast"
+              heatmapMode === "forecast" && forecastWindow === "hours"
+                ? "rgba(62, 207, 76, 0.08)"
+                : "transparent",
+          }}
+        >
+          <label
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              color: "#888",
+              fontWeight: "bold",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+            }}
+          >
+            ⏱️ Próximas 12 h
+            <LayerLamp
+              on={heatmapMode === "forecast" && forecastWindow === "hours"}
+              liveLabel="previsão"
+            />
+            <span
+              style={{
+                color: "#7fdbfa",
+                width: "100%",
+                textAlign: "right",
+                textTransform: "none",
+                fontSize: 13,
+                fontWeight: 800,
+                letterSpacing: 0,
+              }}
+            >
+              +{rainHours} h · {forecastHourClock(rainHours)} · {hourMm.toFixed(0)}{" "}
+              mm/h nesta hora
+            </span>
+            <span
+              style={{
+                color: "#00b4d8",
+                width: "100%",
+                textAlign: "right",
+                textTransform: "none",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              acumulado {hourStack} mm · efetivo {hourEffMm.toFixed(0)} mm → +
+              {hourRiseM.toFixed(2)} m na régua
+            </span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max={NEAR_FORECAST_H}
+            step="1"
+            value={rainHours}
+            onPointerDown={() => armLiveFromHours()}
+            onChange={(e) => {
+              armLiveFromHours();
+              setRainHours(Number(e.target.value));
+            }}
+            style={{ width: "100%", cursor: "pointer" }}
+          />
+          <p
+            className="sheet-expanded-only"
+            style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.45 }}
+          >
+            Bruto {hourGrossMm.toFixed(0)} mm nas {rainHours} h · efetivo{" "}
+            {hourEffMm.toFixed(0)} mm. Cada passo é 1 h da previsão; o acumulado
+            cresce ao avançar (20 mm/h + 20 mm/h + 10 mm = 50 mm).
+          </p>
+        </div>
+        </SidebarSection>
+
+        <SidebarSection
+          id="acumulo"
+          slot="peek"
+          title="Acúmulo previsto (Open-Meteo)"
+          help={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um. Arrastar liga Tempo Real e pinta o heatmap Previsão neste horizonte de dias — as próximas 12 h têm slider próprio. A chuva efetiva (mm) sobe a régua em mm × ${hydroCfg.rain_runoff_coeff} — 32 mm ≈ +1,6 m na cota, não 32 cm nem 2 m de rua. A mancha só aparece quando a cota prevista passa do transbordo deste município. Sem a cota ao vivo, a mancha pode parecer leve se o rio já estiver cheio. Meia-vida do balde: ${hydroCfg.rain_storage_halflife_h} h.`}
+        >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            padding: "10px",
+            borderRadius: 8,
+            border:
+              heatmapMode === "forecast" && forecastWindow === "days"
+                ? "1px solid #3ecf4c"
+                : "1px solid #333",
+            background:
+              heatmapMode === "forecast" && forecastWindow === "days"
                 ? "rgba(62, 207, 76, 0.08)"
                 : "transparent",
           }}
@@ -1767,7 +2192,10 @@ export default function App() {
             }}
           >
             🌧️ Acúmulo previsto (Open-Meteo)
-            <LayerLamp on={heatmapMode === "forecast"} liveLabel="previsão" />
+            <LayerLamp
+              on={heatmapMode === "forecast" && forecastWindow === "days"}
+              liveLabel="previsão"
+            />
             <span
               style={{
                 color: "#7fdbfa",
@@ -1813,9 +2241,9 @@ export default function App() {
             Bruto {forecastRainGrossMm.toFixed(0)} mm · efetivo{" "}
             {forecastRainMm.toFixed(0)} mm → subida +{displayRise.toFixed(2)} m
             na régua (não são {forecastRainMm.toFixed(0)} cm de lâmina). Cota{" "}
-            {forecastRise.toFixed(2)} m
-            {forecastRise >= spillStageM
-              ? ` · ${overbankM.toFixed(2)} m fora da calha (transbordo ${spillStageM.toFixed(1)} m)`
+            {dayStaffM.toFixed(2)} m
+            {dayStaffM >= spillStageM
+              ? ` · ${Math.max(0, dayStaffM - spillStageM).toFixed(2)} m fora da calha (transbordo ${spillStageM.toFixed(1)} m)`
               : ` · ainda na calha (sai em ${spillStageM.toFixed(1)} m) — a mancha só pinta rua acima do transbordo`}
             .
           </p>
@@ -1985,7 +2413,7 @@ export default function App() {
           id="correcao-relevo"
           slot="more"
           title="Correção de relevo (aterro)"
-          help="O Copernicus não vê obra recente. Só contas autorizadas demarcam o polígono e o Δz. Login dummy até existir autenticação de verdade (usuário usuario). Se uma revisão futura do GLO-30 já incluir a obra, o Vale Alerta compara a cota atual com a cota gravada na criação e deixa de somar o patch (absorvido). Δz pequeno perto do ruído de 2–4 m do DEM pede conferência manual."
+          help="Demarcações vão para a tabela topo_patch_reports (GeoJSON + Δz + usuário) quando o Supabase está configurado. Papéis: relator, validador (in loco), admin. A vista “todas” faz a média de Δz nas sobreposições; vermelho = divergência ≥ 1 m. Sem VITE_SUPABASE_URL o modo local (senha 123) continua. Isso não é parecer da Defesa Civil."
         >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label
@@ -2004,8 +2432,12 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  dummyLogout();
+                  void logoutAppUser();
                   setCanEditPatches(false);
+                  setPatchUsername(null);
+                  setPatchUserId(null);
+                  setPatchRole("reporter");
+                  setUserList([]);
                   setDrawingPatch(false);
                   setDrawPoints([]);
                   drawPointsRef.current = [];
@@ -2023,12 +2455,62 @@ export default function App() {
                   textTransform: "none",
                 }}
               >
-                Sair
+                {canEditPatches
+                  ? `Sair (${patchUsername ?? ""}${patchRole !== "reporter" ? ` · ${patchRole}` : ""})`
+                  : "Sair"}
               </button>
             )}
           </label>
+          <button
+            type="button"
+            className={`relief-whatif-btn${reliefWhatIf ? " is-on" : ""}`}
+            disabled={
+              !reliefWhatIf &&
+              patches.length === 0 &&
+              drawPoints.length < 3
+            }
+            onClick={() => setReliefWhatIf((on) => !on)}
+          >
+            {reliefWhatIf
+              ? "Simulando com correções de relevo — voltar ao DEM"
+              : "Simular inundação com correções de relevo"}
+          </button>
+          <p className="relief-whatif-note">
+            {reliefWhatIf
+              ? "Heatmap e hillshade somam o Δz. A água que deixaria de caber no aterro sobe a lâmina no entorno (volume conservado). Se o polígono for pequeno diante da mancha, o acréscimo fica em milímetros. O rio usa o GLO-30 cru. Não é parecer da Defesa Civil."
+              : "Desligado: relevo e mancha usam só o Copernicus, sem Δz. O polígono continua desenhado, mas não entra no modelo até você ligar de novo. Demarcar Δz exige login. Os polígonos ficam só neste navegador."}
+          </p>
+          <div className="patch-view-toggle" role="group" aria-label="Quais marcações ver">
+            <button
+              type="button"
+              className={patchView === "mine" ? "is-on" : ""}
+              onClick={() => setPatchView("mine")}
+            >
+              Minhas marcações
+            </button>
+            <button
+              type="button"
+              className={patchView === "all" ? "is-on" : ""}
+              onClick={() => setPatchView("all")}
+            >
+              Todas as marcações
+            </button>
+          </div>
+          <p className="relief-whatif-note">
+            {patchView === "all"
+              ? "Sobreposições viram um polígono só, com Δz médio (um voto por relator). Vermelho = divergência de altura ≥ 1 m. Verde = relatos alinhados. A área pode diferir um pouco."
+              : "Só os polígonos deste usuário (e os sem autor, gravados antes)."}
+          </p>
           {!canEditPatches ? (
-            <PatchLoginForm onLoggedIn={() => setCanEditPatches(true)} />
+            <PatchLoginForm
+              onLoggedIn={(name, userId, role) => {
+                setPatchUsername(name);
+                setPatchUserId(userId);
+                setPatchRole(role as AppRole);
+                setCanEditPatches(true);
+                if (role === "admin") void listProfiles().then(setUserList);
+              }}
+            />
           ) : (
             <>
               <p
@@ -2040,9 +2522,46 @@ export default function App() {
                 }}
               >
                 {drawingPatch
-                  ? `Clique no mapa para os vértices (${drawPoints.length}). Clique num ponto para removê-lo. Desfazer: último ponto. Mínimo 3.`
+                  ? `Clique no mapa para os vértices (${drawPoints.length}). Com 3 ou mais, clique no primeiro ponto (verde, maior) para fechar o polígono. Duplo clique ou Enter também fecha. Desfazer remove o último ponto.`
                   : "Desenhe a área alterada e a elevação relativa recente."}
               </p>
+              {patchRole === "admin" && isDatabaseEnabled() && (
+                <div className="patch-admin">
+                  <p style={{ margin: 0, fontSize: 11, color: "#ffd166" }}>
+                    Papéis dos usuários
+                  </p>
+                  {userList.map((u) => (
+                    <label key={u.id} style={{ fontSize: 11, color: "#bbb" }}>
+                      {u.display_name}{" "}
+                      <select
+                        value={u.role}
+                        onChange={(e) => {
+                          const role = e.target.value as AppRole;
+                          void setRemoteProfileRole(u.id, role)
+                            .then(() =>
+                              setUserList((prev) =>
+                                prev.map((x) =>
+                                  x.id === u.id ? { ...x, role } : x,
+                                ),
+                              ),
+                            )
+                            .catch((err: unknown) => console.error(err));
+                        }}
+                        style={{
+                          background: "#2d2d2d",
+                          color: "#fff",
+                          border: "1px solid #444",
+                          borderRadius: 4,
+                        }}
+                      >
+                        <option value="reporter">relator</option>
+                        <option value="validator">validador</option>
+                        <option value="admin">admin</option>
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              )}
               <label style={{ fontSize: 11, color: "#aaa" }}>
                 Δz (m), positivo = aterro
                 <input
@@ -2141,40 +2660,7 @@ export default function App() {
                   type="button"
                   disabled={drawPoints.length < 3 || !drawingPatch}
                   onClick={() => {
-                const patch = makeLocalPatch(
-                  drawPoints,
-                  patchDeltaM,
-                  patchName,
-                  editingPatchId ?? undefined,
-                );
-                if (!patch) return;
-                const dem = topoOverlayRef.current;
-                if (dem?.rawElevations) {
-                  const z = meanElevationInPatch(
-                    dem.rawElevations,
-                    dem.width,
-                    dem.height,
-                    dem.bbox,
-                    patch,
-                  );
-                  if (z != null) patch.properties.baseline_z_m = z;
-                }
-                patch.properties.dem_status = "active";
-                    setPatches((prev) => {
-                      const without = prev.filter(
-                        (x) => x.properties.id !== patch.properties.id,
-                      );
-                      return [...without, patch];
-                    });
-                    setDeletedPatchIds((ids) =>
-                      ids.filter((id) => id !== patch.properties.id),
-                    );
-                    setDrawingPatch(false);
-                    setDrawPoints([]);
-                    drawPointsRef.current = [];
-                    drawingRef.current = false;
-                    setEditingPatchId(null);
-                    setPatchName("");
+                    commitDrawnPatch();
                   }}
                   style={{
                     flex: 1,
@@ -2195,6 +2681,18 @@ export default function App() {
                   {editingPatchId ? "Salvar alteração" : "Aplicar Δz"}
                 </button>
               </div>
+              {drawingPatch && drawPoints.length >= 3 && (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: "#f4d35e",
+                    fontWeight: 700,
+                  }}
+                >
+                  Área demarcada: {formatAreaM2(polygonAreaM2(drawPoints))}
+                </p>
+              )}
               {drawingPatch && drawPoints.length > 0 && (
                 <ol
                   style={{
@@ -2234,7 +2732,7 @@ export default function App() {
                   ))}
                 </ol>
               )}
-              {patches.length > 0 && (
+              {patchesForMapView(patches, patchView, patchUsername, patchUserId).length > 0 && (
                 <ul
                   style={{
                     margin: 0,
@@ -2243,15 +2741,20 @@ export default function App() {
                     color: "#bbb",
                   }}
                 >
-                  {patches.map((p) => (
+                  {patchesForMapView(patches, patchView, patchUsername, patchUserId).map((p) => (
                     <li key={p.properties.id} style={{ marginBottom: 8 }}>
                       {p.properties.name ?? p.properties.id} (
                       {p.properties.delta_m > 0 ? "+" : ""}
-                      {p.properties.delta_m.toFixed(1)} m)
+                      {p.properties.delta_m.toFixed(1)} m ·{" "}
+                      {formatAreaM2(patchAreaM2(p))})
                       <div style={{ color: "#888", fontSize: 10, marginTop: 2 }}>
-                        {patchDemCaption(p)}
+                        {p.properties.consensus
+                          ? `${p.properties.report_count} relatos${p.properties.authors ? ` · ${p.properties.authors}` : ""} · amplitude Δz ${p.properties.delta_spread_m?.toFixed(1) ?? "—"} m${p.properties.display_kind === "diverge" ? " · divergência de altura" : ""}`
+                          : `${p.properties.created_by ? `Relator: ${p.properties.created_by}` : "Sem relator"} · ${patchDemCaption(p)}`}
                       </div>
                       <div style={{ display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                        {!p.properties.consensus && (
+                          <>
                         <button
                           type="button"
                           onClick={() => {
@@ -2312,6 +2815,43 @@ export default function App() {
                               : "somar mesmo assim"}
                           </button>
                         )}
+                        {(patchRole === "validator" || patchRole === "admin") &&
+                          !p.properties.consensus && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void validateRemotePatch(p.properties.id)
+                                .then(() => {
+                                  setPatches((prev) =>
+                                    prev.map((x) =>
+                                      x.properties.id === p.properties.id
+                                        ? {
+                                            ...x,
+                                            properties: {
+                                              ...x.properties,
+                                              validated_at: new Date().toISOString(),
+                                            },
+                                          }
+                                        : x,
+                                    ),
+                                  );
+                                })
+                                .catch((err: unknown) => console.error(err));
+                            }}
+                            style={{
+                              background: "transparent",
+                              border: 0,
+                              color: "#80ed99",
+                              cursor: "pointer",
+                              fontSize: 11,
+                              padding: 0,
+                            }}
+                          >
+                            {p.properties.validated_at
+                              ? "validado in loco"
+                              : "validar in loco"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -2324,6 +2864,9 @@ export default function App() {
                               ids.includes(p.properties.id)
                                 ? ids
                                 : [...ids, p.properties.id],
+                            );
+                            void deleteRemotePatch(p.properties.id).catch(
+                              (err: unknown) => console.error(err),
                             );
                             if (editingPatchId === p.properties.id) {
                               setEditingPatchId(null);
@@ -2344,6 +2887,8 @@ export default function App() {
                         >
                           remover
                         </button>
+                          </>
+                        )}
                       </div>
                     </li>
                   ))}
@@ -2385,20 +2930,45 @@ export default function App() {
               {statusBanner}
             </div>
           ) : null}
+          {reliefWhatIf ? (
+            <div className="map-hud-whatif" role="status">
+              Δz no modelo · não validado
+              {spillRedistrib ? (
+                <span className="map-hud-whatif-vol">
+                  aterro deslocou {Math.round(spillRedistrib.displacedM3).toLocaleString("pt-BR")} m³
+                  {spillRedistrib.wseLiftM >= 0.005
+                    ? ` · lâmina +${(spillRedistrib.wseLiftM * 100).toFixed(1)} cm no entorno`
+                    : " · acréscimo < 0,5 cm (polígono pequeno diante da mancha)"}
+                </span>
+              ) : (
+                <span className="map-hud-whatif-vol">
+                  sem volume inundável no polígono nesta cota
+                </span>
+              )}
+            </div>
+          ) : null}
           <div className="map-hud-status">
             <span className="layer-lamp-dot on" />
             <span className="map-layer-flag-text">
               <span className="map-layer-flag-date">
-                {heatmapMode === "now" ? todayLabel : forecastDayLabel}
+                {heatmapMode === "now"
+                  ? todayLabel
+                  : forecastWindow === "hours"
+                    ? `+${rainHours} h · ${forecastHourClock(rainHours)}`
+                    : forecastDayLabel}
               </span>
               <span className="map-layer-flag-meta">
                 {heatmapMode === "now"
                   ? overbankM > 0
                     ? `Agora · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
                     : `Agora · na calha · +${timeWindow}h`
-                  : overbankM > 0
-                    ? `Previsão · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
-                    : `Previsão · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`}
+                  : forecastWindow === "hours"
+                    ? overbankM > 0
+                      ? `Previsão ${rainHours} h · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha`
+                      : `Previsão ${rainHours} h · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`
+                    : overbankM > 0
+                      ? `Previsão · cota ${forecastRise.toFixed(2)} m · ${overbankM.toFixed(2)} m fora da calha · +${timeWindow}h`
+                      : `Previsão · cota ${forecastRise.toFixed(2)} m · na calha (sai em ${spillStageM.toFixed(1)} m)`}
               </span>
             </span>
           </div>

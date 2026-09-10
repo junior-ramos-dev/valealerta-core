@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!frontend-dashboard/.env.example
 
 # Python
 venv/

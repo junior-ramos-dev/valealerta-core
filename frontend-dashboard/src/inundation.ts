@@ -1,7 +1,8 @@
 /**
  * Heatmap de inundação no cliente.
  *
- * Profundidade = WSE − z_Copernicus. O WSE não é a régua inteira sobre o DEM
+ * Profundidade = WSE − z_terreno. z_terreno pode incluir Δz de patches;
+ * o talvegue (WSE) usa o GLO-30 cru para um aterro na margem não “subir o rio”.
  * (o canal no GLO-30 é raso): só a lâmina *acima do transbordo municipal*
  * (extraAboveSpillM) é espalhada a partir do talvegue.
  * A água só se propaga por células ligadas ao rio (flood-fill), não por lagos isolados.
@@ -212,60 +213,54 @@ export function estimateChannelThalwegM(
   return channelThalwegM(elevations, rasterizeRiver(width, height, bbox, branchIds));
 }
 
-/**
- * Pinta a mancha.
- * extraAboveSpillM = max(0, régua − transbordo), em metros: zero = rio na calha.
- * WSE = talvegue_DEM + extra × ocupação da janela de escape (recuo ao leito).
- * CONNECT_SLACK deixa a água passar ruído de ~0,55 m do DSM sem pintar teto/copa.
- */
-export async function renderSpillHeatmap(
-  elevations: Float32Array,
+function cellAreaM2(bbox: LonLatBBox, width: number, height: number): number {
+  const lat = ((bbox.north + bbox.south) / 2) * (Math.PI / 180);
+  const dx = ((bbox.east - bbox.west) / Math.max(width, 1)) * 111_320 * Math.cos(lat);
+  const dy = ((bbox.north - bbox.south) / Math.max(height, 1)) * 110_574;
+  return Math.abs(dx * dy);
+}
+
+function spillVolumeM3(
+  assigned: Float32Array,
+  landZ: Float32Array,
+  cellM2: number,
+): number {
+  let v = 0;
+  for (let i = 0; i < assigned.length; i += 1) {
+    const wse = assigned[i];
+    const z = landZ[i];
+    if (!Number.isFinite(wse) || isNoData(z)) continue;
+    const d = wse - z;
+    if (d > 0) v += d * cellM2;
+  }
+  return v;
+}
+
+function floodAtWse(
+  wse: number,
+  landZ: Float32Array,
+  riverZ: Float32Array,
+  onRiver: Uint8Array,
+  seeds: { i: number }[],
   width: number,
-  height: number,
-  bbox: LonLatBBox,
-  extraAboveSpillM: number,
-  hour: number,
-  uniform = false,
-  viewBbox?: LonLatBBox,
-  branchIds?: string[],
-): Promise<HTMLCanvasElement> {
-  const n = width * height;
+  n: number,
+): Float32Array {
   const assigned = new Float32Array(n);
   assigned.fill(Number.NaN);
   const reached = new Uint8Array(n);
   const queue: number[] = [];
   let qHead = 0;
-  const seeds = rasterizeRiver(width, height, bbox, branchIds);
-  const thalweg = channelThalwegM(elevations, seeds);
-
-  const canvas = document.createElement("canvas");
-  if (!Number.isFinite(thalweg)) {
-    canvas.width = 1;
-    canvas.height = 1;
-    return canvas;
-  }
-
-  const view = viewBbox ?? bbox;
-  const occ = uniform
-    ? 1
-    : floodOccupancy(hour, nearestRiverLag((view.west + view.east) / 2, (view.south + view.north) / 2, branchIds));
-  // Lâmina de rua, não a cota da régua: 5 m ANA com transbordo 8 m → extra 0 → sem mancha.
-  const wse = thalweg + Math.max(0, extraAboveSpillM) * occ;
-
-  const canPass = (z: number) => z < wse + CONNECT_SLACK_M;
-  const canPaint = (z: number) => z < wse;
-
+  const zFlow = (i: number) => (onRiver[i] ? riverZ[i] : landZ[i]);
   const enqueue = (i: number) => {
     if (reached[i]) return;
-    const z = elevations[i];
-    if (isNoData(z) || !canPass(z)) return;
+    const zf = zFlow(i);
+    if (isNoData(zf) || zf >= wse + CONNECT_SLACK_M) return;
     reached[i] = 1;
-    if (canPaint(z)) assigned[i] = wse;
+    const z = landZ[i];
+    if (!isNoData(z) && z < wse) assigned[i] = wse;
     queue.push(i);
   };
-
   for (const seed of seeds) enqueue(seed.i);
-
   const neighbors = [-1, 1, -width, width, -width - 1, -width + 1, width - 1, width + 1];
   while (qHead < queue.length) {
     const i = queue[qHead];
@@ -279,13 +274,99 @@ export async function renderSpillHeatmap(
       enqueue(j);
     }
   }
+  return assigned;
+}
 
+export type SpillPaint = {
+  canvas: HTMLCanvasElement;
+  wseLiftM: number;
+  displacedM3: number;
+};
+
+const MAX_WSE_LIFT_M = 4;
+const VOLUME_ITERS = 12;
+
+/**
+ * Pinta a mancha.
+ * extraAboveSpillM = max(0, régua − transbordo), em metros: zero = rio na calha.
+ * WSE = talvegue_GLO-30 (sem Δz) + extra × ocupação da janela de escape.
+ * CONNECT_SLACK deixa a água passar ruído de ~0,55 m do DSM sem pintar teto/copa.
+ * channelElevations: cota do leito sem patches; a mancha nas ruas usa `elevations`.
+ * Se o aterro ocupar volume inundável, a lâmina sobe até repor esse volume ao redor.
+ */
+export async function renderSpillHeatmap(
+  elevations: Float32Array,
+  width: number,
+  height: number,
+  bbox: LonLatBBox,
+  extraAboveSpillM: number,
+  hour: number,
+  uniform = false,
+  viewBbox?: LonLatBBox,
+  branchIds?: string[],
+  channelElevations?: Float32Array,
+  redistributeVolume = false,
+): Promise<SpillPaint> {
+  const n = width * height;
+  const canvas = document.createElement("canvas");
+  const empty = (): SpillPaint => {
+    canvas.width = 1;
+    canvas.height = 1;
+    return { canvas, wseLiftM: 0, displacedM3: 0 };
+  };
+  const seeds = rasterizeRiver(width, height, bbox, branchIds);
+  const riverZ = channelElevations ?? elevations;
+  const onRiver = new Uint8Array(n);
+  for (const seed of seeds) onRiver[seed.i] = 1;
+  const thalweg = channelThalwegM(riverZ, seeds);
+
+  if (!Number.isFinite(thalweg)) return empty();
+
+  const view = viewBbox ?? bbox;
+  const occ = uniform
+    ? 1
+    : floodOccupancy(hour, nearestRiverLag((view.west + view.east) / 2, (view.south + view.north) / 2, branchIds));
+  const wse0 = thalweg + Math.max(0, extraAboveSpillM) * occ;
+
+  let wse = wse0;
+  let displacedM3 = 0;
+  const cellM2 = cellAreaM2(bbox, width, height);
+  const hasPatch =
+    redistributeVolume &&
+    channelElevations != null &&
+    channelElevations.length === elevations.length &&
+    extraAboveSpillM > 0;
+
+  if (hasPatch) {
+    const assignedRaw = floodAtWse(wse0, riverZ, riverZ, onRiver, seeds, width, n);
+    const assignedPatch = floodAtWse(wse0, elevations, riverZ, onRiver, seeds, width, n);
+    const targetM3 = spillVolumeM3(assignedRaw, riverZ, cellM2);
+    const v0 = spillVolumeM3(assignedPatch, elevations, cellM2);
+    displacedM3 = Math.max(0, targetM3 - v0);
+    if (displacedM3 > cellM2 * 0.05) {
+      let lo = wse0;
+      let hi = wse0 + MAX_WSE_LIFT_M;
+      for (let k = 0; k < VOLUME_ITERS; k += 1) {
+        const mid = (lo + hi) / 2;
+        const v = spillVolumeM3(
+          floodAtWse(mid, elevations, riverZ, onRiver, seeds, width, n),
+          elevations,
+          cellM2,
+        );
+        if (v < targetM3) lo = mid;
+        else hi = mid;
+      }
+      wse = hi;
+    }
+  }
+
+  const assigned = floodAtWse(wse, elevations, riverZ, onRiver, seeds, width, n);
   const pixels = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i += 1) {
-    const wse = assigned[i];
+    const surface = assigned[i];
     const z = elevations[i];
-    if (!Number.isFinite(wse) || isNoData(z)) continue;
-    const depth = wse - z; // metros de água no pixel = superfície − terreno
+    if (!Number.isFinite(surface) || isNoData(z)) continue;
+    const depth = surface - z;
     const [r, g, b, a] = colorForDepthM(depth);
     if (a === 0) continue;
     const o = i * 4;
@@ -298,5 +379,5 @@ export async function renderSpillHeatmap(
   canvas.width = width;
   canvas.height = height;
   canvas.getContext("2d")?.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return canvas;
+  return { canvas, wseLiftM: Math.max(0, wse - wse0), displacedM3 };
 }
