@@ -76,14 +76,11 @@ export function SidebarSection({
   id,
   title,
   help,
-  slot = "more",
   children,
 }: {
   id: string;
   title?: string;
   help?: ReactNode;
-  /** On the phone sheet, peek blocks sit first; more follows in the same scroll. */
-  slot?: "peek" | "more";
   children: ReactNode;
 }) {
   const ctx = useContext(HelpContext);
@@ -91,7 +88,7 @@ export function SidebarSection({
   return (
     <>
       <div
-        className={`sidebar-block sidebar-slot-${slot}${hot ? " is-hot" : ""}`}
+        className={`sidebar-block${hot ? " is-hot" : ""}`}
         data-id={id}
         onMouseEnter={() => ctx?.setHoverId(id)}
         onMouseLeave={() => ctx?.setHoverId(null)}

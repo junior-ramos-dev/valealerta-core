@@ -785,7 +785,29 @@
   padding: 24px;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 20px;
+  box-sizing: border-box;
+}
+
+.sidebar-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.sidebar-block input[type="range"] {
+  display: block;
+  width: 100%;
+  margin: 0;
+  accent-color: #00b4d8;
+}
+
+.sidebar-block select,
+.sidebar-block input[type="text"],
+.sidebar-block input[type="email"],
+.sidebar-block input[type="password"],
+.sidebar-block input[type="number"] {
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -1088,44 +1110,10 @@
     border-radius: 99px;
   }
 
-  .sidebar-slot-peek {
-    order: 1;
-  }
-
-  .sidebar-slot-more {
-    order: 20;
-  }
-
-  .sidebar-block[data-id="titulo"] {
-    order: 1;
-  }
-  .sidebar-block[data-id="abas"] {
-    order: 2;
-  }
-  .sidebar-block[data-id="municipio"] {
-    order: 3;
-  }
-  .sidebar-block[data-id="tempo-real"] {
-    order: 4;
-  }
-  .sidebar-block[data-id="regua"] {
-    order: 5;
-  }
-  .sidebar-block[data-id="acumulo"] {
-    order: 6;
-  }
-  .sidebar-block[data-id="correcao-relevo"] {
-    order: 3;
-  }
-
   .sidebar-tabs {
     top: -4px;
     padding: 0 0 4px;
     background: #1f1f1f;
-  }
-
-  .sheet-expanded-only {
-    display: none !important;
   }
 
   .sidebar-title-row h2 {

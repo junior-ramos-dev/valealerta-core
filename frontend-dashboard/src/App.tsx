@@ -1560,7 +1560,6 @@ export default function App() {
       <SidebarDock helpOpen={helpOpen}>
         <SidebarSection
           id="titulo"
-          slot="peek"
           title={region.title}
           help="As abas Simulação e Ferramentas separam a régua da correção de relevo. O botão Ajuda abre o painel de textos. Esc fecha. No computador, passe o mouse num bloco para ver o par. No celular, a barra vira uma folha baixa na base da tela — o mapa continua visível."
         >
@@ -1589,7 +1588,6 @@ export default function App() {
 
         <SidebarSection
           id="abas"
-          slot="peek"
           title="Abas da barra"
           help="Simulação concentra bacia, município, overlay, régua e chuva. Ferramentas concentra a correção de relevo: cadastro, demarcações e a simulação com Δz."
         >
@@ -1623,7 +1621,6 @@ export default function App() {
         <>
         <SidebarSection
           id="bacia"
-          slot="more"
           title="Bacia"
           help="Troca o pacote da bacia (cidades, estações ANA, cotas e textos). Cada vale tem calibração própria — não copie cotas de transbordo entre bacias. Baixar esta bacia grava o pacote, o último retrato Open-Meteo/ANA e os tiles Copernicus da bbox — sem isso o PWA instalado é só o casco do app."
         >
@@ -1726,7 +1723,6 @@ export default function App() {
 
         <SidebarSection
           id="municipio"
-          slot="peek"
           title="Município do vale"
           help={
             <>
@@ -1844,7 +1840,6 @@ export default function App() {
 
         <SidebarSection
           id="overlay"
-          slot="more"
           title="Overlay de relevo (Copernicus)"
           help="Hillshade do Copernicus DEM GLO-30 (30 m) na área visível. Após mover o mapa ou trocar de cidade, espera 1 s e recarrega relevo + heatmap. O slider só muda a opacidade."
         >
@@ -1891,7 +1886,6 @@ export default function App() {
 
         <SidebarSection
           id="escala"
-          slot="more"
           title="Escala de profundidade (cm)"
           help={`O número azul é intensidade (mm por hora), não o total da chuva. Ex.: ${legendMmhExample.toFixed(0)} mm/h durante ${CRITICAL_RAIN_H} h seguidas = cerca de ${legendRainTotalExample} mm no total. Isso leva a água até a cota de transbordo (${spillStageM.toFixed(1)} m) mais a profundidade do quadrado (ΔH = chuva×${hydroCfg.rain_runoff_coeff} + Q/${hydroCfg.valley_width_factor}).`}
         >
@@ -1949,7 +1943,6 @@ export default function App() {
 
         <SidebarSection
           id="regua"
-          slot="peek"
           title="Nível do rio (régua)"
           help={`Arrastar este slider coloca no mapa só o heatmap Agora (régua × DEM). Zero = nível natural no leito. Transbordo de ${cityStaff.city_name}: ${cityStaff.spill_stage_min_m} a ${cityStaff.spill_stage_max_m} m. ${cityStaff.spill_note}`}
         >
@@ -2053,7 +2046,6 @@ export default function App() {
 
         <SidebarSection
           id="tempo-real"
-          slot="peek"
           title="Tempo Real"
           help="Ligado: mostra a cota ANA atual e ela vira o mínimo da régua — dá para simular acima, não abaixo. Desligado: a régua vai de 0 até o teto, livre. Arrastar a previsão de chuva liga este modo sozinho, para a mancha não partir de um rio “normal” se a ANA já estiver um metro acima. Resetar segue o mesmo modo."
         >
@@ -2093,7 +2085,6 @@ export default function App() {
 
         <SidebarSection
           id="chuva-24h"
-          slot="more"
           title="Próximas 24 h"
           help="Volume previsto nas próximas 24 horas a montante — não é o mesmo que o dia 1 do slider (resto de hoje no fuso de São Paulo). A subida usa chuva efetiva × coeficiente da bacia, sobre a cota da régua. Mover o slider de previsão liga Tempo Real para essa cota não ficar abaixo da ANA."
         >
@@ -2124,7 +2115,6 @@ export default function App() {
 
         <SidebarSection
           id="chuva-12h"
-          slot="more"
           title="Próximas 12 h (hora a hora)"
           help="Doze passos da série Open-Meteo a montante: 1 = esta hora (fuso de São Paulo), 12 = daqui a 11 h. O número grande é mm naquela hora (≈ mm/h se chover o bloco inteiro). O acumulado soma as horas 1…N (ex.: 20 mm/h nas duas primeiras e +10 mm na terceira = 50 mm). A subida da régua usa chuva efetiva × coeficiente da bacia. Arrastar liga Tempo Real e pinta o heatmap Previsão nesta janela — o slider de 7 dias é outro horizonte."
         >
@@ -2216,7 +2206,6 @@ export default function App() {
 
         <SidebarSection
           id="acumulo"
-          slot="peek"
           title="Acúmulo previsto (Open-Meteo)"
           help={`A semana começa hoje (não amanhã): 1 = restante de hoje, 7 = até o mesmo dia da semana que vem menos um. Arrastar liga Tempo Real e pinta o heatmap Previsão neste horizonte de dias — as próximas 12 h têm slider próprio. A chuva efetiva (mm) sobe a régua em mm × ${hydroCfg.rain_runoff_coeff} — 32 mm ≈ +1,6 m na cota, não 32 cm nem 2 m de rua. A mancha só aparece quando a cota prevista passa do transbordo deste município. Sem a cota ao vivo, a mancha pode parecer leve se o rio já estiver cheio. Meia-vida do balde: ${hydroCfg.rain_storage_halflife_h} h.`}
         >
@@ -2310,7 +2299,6 @@ export default function App() {
 
         <SidebarSection
           id="janela"
-          slot="more"
           title="Janela de escape"
           help={`Vale para os dois heatmaps. A onda sobe até o pico local (ex.: ${surge?.name ?? "montante"} em ~${surgeLagH(region)} h) e depois a água volta ao leito em cerca de ${hydroCfg.overbank_drain_h} h. Em ${region.copy.target_short}, +${timeWindow} h deixa cerca de ${Math.round(targetOccupancy * 100)}% da lâmina de pico ainda na planície.`}
         >
@@ -2349,7 +2337,6 @@ export default function App() {
 
         <SidebarSection
           id="delta-h"
-          slot="more"
           title="ΔH chuva efetiva"
           help={`Subida pela chuva efetiva (não a soma bruta): mm do balde × ${hydroCfg.rain_runoff_coeff}. Intervalos secos esvaziam o balde. A janela de escape aplica o recuo ao leito nos dois heatmaps.`}
         >
@@ -2397,7 +2384,6 @@ export default function App() {
         {liveRiver && (
           <SidebarSection
             id="agora-no-rio"
-            slot="more"
             title="Agora no rio"
             help="Telemetria ANA HidroWeb das estações do pacote. Sem rede, o app usa o último retrato gravado neste aparelho (não é cota ao vivo). A cota da ANA é o piso da régua em Tempo Real."
           >
@@ -2435,7 +2421,6 @@ export default function App() {
         {sheetLayout ? (
         <SidebarSection
           id="sonda"
-          slot="more"
           title="Sonda do mapa"
           help="No celular a cota e as coordenadas ficam nesta lista. No computador elas ficam no card do mapa, com a data. Toque no mapa para fixar; Seguir o mapa volta ao centro da vista."
         >
@@ -2472,7 +2457,6 @@ export default function App() {
         {sidebarTab === "tools" ? (
         <SidebarSection
           id="correcao-relevo"
-          slot="peek"
           title="Correção de relevo (aterro)"
           help="Demarcações vão para a tabela topo_patch_reports (GeoJSON + Δz + usuário) quando o Supabase está configurado. Papéis: relator, validador (in loco), admin. A vista “todas” faz a média de Δz nas sobreposições; vermelho = divergência ≥ 1 m. Sem VITE_SUPABASE_URL o modo local (senha 123) continua. Isso não é parecer da Defesa Civil."
         >
