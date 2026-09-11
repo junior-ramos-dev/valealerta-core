@@ -9,6 +9,27 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 const REGIONS_DIR = resolve(rootDir, "../regions");
 const LEGACY_PATCHES = resolve(rootDir, "../backend-satellite/topo_patches/patches.geojson");
 
+const MAPLIBRE_DIST = resolve(rootDir, "node_modules/maplibre-gl/dist");
+
+/** MapLibre 6 resolves `./maplibre-gl-worker.mjs` from import.meta.url of the app chunk. */
+function maplibreWorkerPlugin(): Plugin {
+  const names = ["maplibre-gl-worker.mjs", "maplibre-gl-shared.mjs"] as const;
+  return {
+    name: "valealerta-maplibre-worker",
+    generateBundle() {
+      for (const name of names) {
+        const path = resolve(MAPLIBRE_DIST, name);
+        if (!existsSync(path)) continue;
+        this.emitFile({
+          type: "asset",
+          fileName: `assets/${name}`,
+          source: readFileSync(path),
+        });
+      }
+    },
+  };
+}
+
 function isSafeRegionFile(name: string): boolean {
   return /^[a-zA-Z0-9._-]+\.(json|geojson)$/.test(name) || name === "index.json";
 }
@@ -113,6 +134,7 @@ export default defineConfig({
     react(),
     regionsPlugin(),
     pwaDocPlugin(),
+    maplibreWorkerPlugin(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: [
@@ -155,9 +177,14 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,json,geojson,png,webmanifest,woff2,md}"],
+        globPatterns: ["**/*.{js,mjs,css,html,svg,json,geojson,png,webmanifest,woff2,md}"],
         navigateFallback: "index.html",
-        navigateFallbackDenylist: [/^\/copernicus-dem\//, /^\/ana-hidro\//, /\.md$/],
+        navigateFallbackDenylist: [
+          /^\/copernicus-dem\//,
+          /^\/ana-hidro\//,
+          /\.md$/,
+          /\.mjs$/,
+        ],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\.open-meteo\.com\/.*/i,

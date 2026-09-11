@@ -135,6 +135,7 @@ Repita o passo 2 quando mudar de bacia ou quiser um retrato hidro mais novo **an
 Sem isto o install não aparece ou o mapa/DEM quebram fora do `localhost`:
 
 - Servir o conteúdo de `frontend-dashboard/dist` em **HTTPS** (mesmo origin para `/`, `/sw.js`, `/manifest.webmanifest`).
+- Incluir `assets/maplibre-gl-worker.mjs` e `assets/maplibre-gl-shared.mjs` (o `vite build` copia). Sem o worker, o Caddy devolve `index.html` nesse URL e o **heatmap some** (o hillshade pode continuar).
 - Manter os proxies (ou equivalentes) de **`/copernicus-dem`** e **`/ana-hidro`**: no Vite eles só existem em `dev`/`preview`. Em produção o servidor (nginx, CDN + functions, etc.) precisa encaminhar esses caminhos; senão o heatmap e a cota ANA não carregam mesmo online.
 - Não bloquear o service worker (cabeçalhos corretos para `sw.js`; não servir o app em um subpath sem ajustar `start_url` / `scope` no manifest).
 

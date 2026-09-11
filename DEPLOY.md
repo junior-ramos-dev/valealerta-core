@@ -60,7 +60,7 @@ npm ci
 npm run build
 ```
 
-Saída: `frontend-dashboard/dist/`. Sem essas variáveis o app publicado cai no modo local (senha `123`).
+Saída: `frontend-dashboard/dist/` (incluindo `assets/maplibre-gl-worker.mjs` e `maplibre-gl-shared.mjs` — o MapLibre 6 pede-os ao lado do JS principal). Sem as variáveis `VITE_SUPABASE_*` o app publicado cai no modo local (senha `123`).
 
 ---
 
@@ -239,7 +239,8 @@ curl -I --resolve SEU_DOMINIO:80:IP_ELASTICO http://SEU_DOMINIO/
 | HTTPS na porta 80 / `curl https://IP:80` | Esquema errado. 80 = `http://`. 443 = `https://`. |
 | HTTP 200 no IP, HTTPS do domínio falha | Security group sem **443**, ou DNS ainda não no Elastic IP, ou Caddy ainda com `auto_https off`. |
 | `dig` não mostra o IP da EC2 | TTL do Registro.br; espere. Confira se não criou CNAME para Supabase. |
-| Mapa sem heatmap / sem cota ANA, mas o HTML abre | `dist/` antigo (build sem proxies testados) ou Caddyfile sem `handle_path`. |
+| Mapa sem heatmap / sem cota ANA, mas o HTML abre | `dist/` antigo, Caddyfile sem `handle_path`, ou worker do MapLibre em falta (linha seguinte). |
+| `text/html` em `/assets/*.js` ou `maplibre-gl-worker.mjs` | SPA fallback: ficheiro em falta no `dist/`. O `vite build` copia `maplibre-gl-worker.mjs` e `maplibre-gl-shared.mjs` para `dist/assets/`. Sem o worker o heatmap some; o hillshade pode até aparecer. Recarregue de janela anônima se o PWA antigo ainda servir HTML nesse URL. |
 | Login local senha `123` em produção | Build **sem** `VITE_SUPABASE_*`. Rebuild + `rsync`. |
 | Confirmação de e-mail aponta para localhost | Site URL do Supabase ainda em `localhost`. |
 | Let’s Encrypt falha no log | `sudo journalctl -u caddy -n 80 --no-pager` — DNS, porta 80, ou excesso de tentativas ACME. |
