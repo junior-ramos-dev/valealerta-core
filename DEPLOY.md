@@ -28,11 +28,11 @@ Variáveis Vite (`VITE_SUPABASE_*`) entram **na hora do `npm run build`**. Troca
 1. Crie o projeto. Ative **PostGIS** (Database → Extensions).
 2. SQL Editor: rode `backend-database/migrations.sql` (inclui `preferred_region_id` / `preferred_city_id`).
 3. **Settings → API**: copie **Project URL** e a chave **anon** / **Publishable** (`sb_publishable_…` ou JWT `anon`). Nunca `service_role` nem senha do Postgres no frontend.
-4. **Authentication → URL Configuration**
-   - **Site URL:** `https://SEU_DOMINIO` (depois que o HTTPS existir).
-   - **Redirect URLs:** `https://SEU_DOMINIO/**` e, se ainda desenvolver local: `http://localhost:5173/**`, `http://localhost:4173/**`.
-5. **Authentication → Providers → Email:** na beta fechada pode desligar **Confirm email** (o `signUp` já devolve sessão). Com confirmação ligada, o link do e-mail usa a Site URL — `localhost` não abre no celular.
-6. Modelos de e-mail em português exigem plano pago ou SMTP próprio (free novo não edita o template no SMTP da Supabase). Adiável na beta.
+4. **Authentication → URL Configuration** (obrigatório — o padrão do projeto é `http://localhost:3000`)
+   - **Site URL:** `https://valealertasc.com.br` (produção). Sem isto o e-mail de confirmação abre `localhost:3000` mesmo com o PWA no ar.
+   - **Redirect URLs:** `https://valealertasc.com.br/**`, `http://localhost:5173/**`, `http://localhost:4173/**`.
+5. **Authentication → Providers → Email:** deixe **Confirm email** ligado. O cadastro no app pede para abrir o e-mail (modelo customizado no painel) e só então **Entrar**. O link do e-mail usa `emailRedirectTo` de `VITE_APP_URL` (`.env.production` vs `.env.development`). A **Site URL** do painel ainda é o fallback se o `emailRedirectTo` não estiver na allowlist.
+6. **Email Templates:** o modelo de confirmação pode estar em português no painel (pago ou SMTP próprio). Redirect URLs têm de incluir `https://SEU_DOMINIO/**`.
 7. Primeiro admin (SQL), com o `id` em Authentication → Users:
 
 ```sql
@@ -45,15 +45,17 @@ update public.profiles set role = 'admin' where id = '<auth uid>';
 
 ```bash
 cd frontend-dashboard
-cp .env.example .env.production
+cp .env.example .env.production.local   # só as chaves; o .env.production do git já tem VITE_APP_URL
 ```
 
-Edite `.env.production` (o Vite lê isso no `build`):
+Edite `.env.production.local` (não vai para o git):
 
 ```bash
 VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
 ```
+
+O Vite no `npm run build` junta `.env.production` (`VITE_APP_ENV=production`, `VITE_APP_URL=https://valealertasc.com.br`) com esse ficheiro. No `npm run dev` usa `.env.development` (localhost:5173) + `.env.local`.
 
 ```bash
 npm ci

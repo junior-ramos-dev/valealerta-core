@@ -175,7 +175,7 @@ O Copernicus não “vê” obra de ontem. Relatores autenticados **somam um Δz
 
 Com `frontend-dashboard/.env.local` (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`):
 
-- **Entrar:** e-mail e senha. **Cadastrar:** nome, cidade e estado onde reside, bacia e município padrão ao abrir o app, e-mail e senha. Papel inicial: relator. Os padrões gravam no perfil (`municipality`, `preferred_region_id`, `preferred_city_id`) e neste aparelho.
+- **Entrar:** e-mail e senha. **Cadastrar:** nome, cidade e estado onde reside, bacia e município padrão ao abrir o app, e-mail e senha. O Supabase envia o e-mail de confirmação (modelo do projeto); depois use **Entrar**. Papel inicial: relator. Os padrões gravam no perfil (`municipality`, `preferred_region_id`, `preferred_city_id`) e neste aparelho.
 - A chave no painel novo do Supabase é **Publishable** (`sb_publishable_…`) ou, na aba legado, **anon**. Não use senha do Postgres nem `service_role` no app.
 - Ao **Aplicar Δz**, a linha vai para `public.topo_patch_reports` (Polygon em `geojson`, Δz, `user_id`, `form`). Quem abre o mapa lê as demarcações **assim que são salvas**.
 - Papéis em `public.profiles.role`: **reporter** (padrão), **validator** (botão validar in loco), **admin** (troca papéis na barra). Primeiro admin no SQL: `update public.profiles set role = 'admin' where id = '<uid>';`
@@ -350,7 +350,7 @@ Saídas: `backend-satellite/data/hydro_now.json` e, se a pasta existir, `fronten
 
 1. Crie o projeto, ative PostGIS e rode `backend-database/migrations.sql` no SQL Editor.
 2. Em **Settings → API Keys**, copie a **Publishable key** (ou **anon** na aba legado) — não a senha do banco.
-3. `frontend-dashboard/.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`; reinicie o Vite.
+3. `frontend-dashboard/.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`; o `npm run dev` já usa `http://localhost:5173` (`.env.development`). O build de produção usa `.env.production` + `.env.production.local`. Reinicie o Vite.
 4. Crie a conta no app (aba **Ferramentas** → **Cadastrar**). Primeiro admin: `update public.profiles set role = 'admin' where id = '<uid>';` (Authentication → Users). Em projeto já criado, rode de novo o trecho de `profiles` em `migrations.sql` se faltar `preferred_region_id` / `preferred_city_id`.
 
 Publicar em EC2 + Caddy (domínio, proxies ANA/Copernicus, `curl` de teste): **[DEPLOY.md](../DEPLOY.md)**.

@@ -21,7 +21,7 @@ Isso não vira GNSS nem parecer da Defesa Civil. Ajuda a simulação se a marca�
 1. Abra o dashboard (`npm run dev` ou o host em produção).
 2. Na barra, aba **Ferramentas** (a aba **Simulação** guarda régua, bacia e chuva).
 3. Sem login, a aba mostra o aviso de que correções exigem cadastro e o formulário **Entrar | Cadastrar**.
-4. **Com banco (Supabase):** em **Cadastrar**, informe nome, cidade/estado onde reside, **bacia** e **município padrão** ao abrir o app, e-mail e senha (papel relator). Peça a um admin se precisar ser validador. Em **Entrar**, só e-mail e senha.
+4. **Com banco (Supabase):** em **Cadastrar**, informe nome, cidade/estado onde reside, **bacia** e **município padrão** ao abrir o app, e-mail e senha (papel relator). Confirme no e-mail do Vale Alerta SC e depois use **Entrar**. Peça a um admin se precisar ser validador.
 5. **Sem banco:** **Cadastrar** ou **Entrar** com nome (2+ letras) + senha `123` — os polígonos ficam só neste navegador até existir projeto Supabase. Os padrões de bacia/cidade gravam neste aparelho.
 
 ### Como demarcar (área × altura)

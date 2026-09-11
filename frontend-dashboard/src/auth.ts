@@ -1,3 +1,4 @@
+import { emailRedirectTo } from "./appConfig";
 import { dummyLogout, readDummyPlacePrefs, readDummyUsername, saveDummyPlacePrefs, tryDummyLogin } from "./dummyAuth";
 import { storeCityId, storeRegionId } from "./region";
 import { getSupabase, isDatabaseEnabled } from "./supabaseClient";
@@ -117,11 +118,15 @@ export async function loginAppUser(
   return dummyUser(name);
 }
 
+export type SignUpResult =
+  | { status: "session"; user: AppUser }
+  | { status: "confirm-email" };
+
 export async function signUpAppUser(
   email: string,
   password: string,
   profile: SignupProfile,
-): Promise<AppUser> {
+): Promise<SignUpResult> {
   const displayName = profile.displayName.trim() || email.trim();
   const municipality = municipalityLabel(profile.homeCity, profile.homeState);
   const meta = {
@@ -144,13 +149,17 @@ export async function signUpAppUser(
       preferredRegionId: profile.preferredRegionId,
       preferredCityId: profile.preferredCityId,
     });
-    return dummyUser(name);
+    return { status: "session", user: dummyUser(name) };
   }
 
+  const origin = emailRedirectTo();
   const { data, error } = await sb.auth.signUp({
     email: email.trim(),
     password,
-    options: { data: meta },
+    options: {
+      data: meta,
+      emailRedirectTo: origin,
+    },
   });
   if (error || !data.user) {
     throw new Error(error?.message ?? "Não foi possível criar a conta.");
@@ -167,12 +176,13 @@ export async function signUpAppUser(
         updated_at: new Date().toISOString(),
       })
       .eq("id", data.user.id);
-    return profileFromSession(data.user.id, displayName);
+    return {
+      status: "session",
+      user: await profileFromSession(data.user.id, displayName),
+    };
   }
 
-  throw new Error(
-    "Conta criada. Confirme o e-mail se o projeto exigir, depois entre.",
-  );
+  return { status: "confirm-email" };
 }
 
 export async function logoutAppUser(): Promise<void> {

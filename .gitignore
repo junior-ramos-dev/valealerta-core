@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 !frontend-dashboard/.env.example
+!frontend-dashboard/.env.development
+!frontend-dashboard/.env.production
 
 # Python
 venv/

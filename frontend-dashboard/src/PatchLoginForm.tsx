@@ -76,6 +76,7 @@ export function PatchLoginForm({
   const [preferredCityId, setPreferredCityId] = useState(currentCityId ?? "");
   const [cities, setCities] = useState<RegionCity[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -115,6 +116,7 @@ export function PatchLoginForm({
   const finish = async (next: "in" | "up") => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       if (next === "up") {
         const name = displayName.trim() || identifier.trim();
@@ -127,14 +129,21 @@ export function PatchLoginForm({
         if (!preferredRegionId || !preferredCityId) {
           throw new Error("Escolha a bacia e a cidade padrão do aplicativo.");
         }
-        const user = await signUpAppUser(identifier, password, {
+        const result = await signUpAppUser(identifier, password, {
           displayName: name,
           homeCity,
           homeState,
           preferredRegionId,
           preferredCityId,
         });
-        onLoggedIn(user);
+        if (result.status === "confirm-email") {
+          setMode("in");
+          setNotice(
+            "Conta criada. Abra o e-mail do Vale Alerta SC, confirme o cadastro e depois entre aqui com o mesmo e-mail e senha.",
+          );
+          return;
+        }
+        onLoggedIn(result.user);
         return;
       }
       onLoggedIn(await loginAppUser(identifier, password));
@@ -178,7 +187,7 @@ export function PatchLoginForm({
       <p style={{ margin: 0, fontSize: 11, color: "#888", lineHeight: 1.4 }}>
         {db
           ? mode === "up"
-            ? "Crie a conta para enviar correções de relevo. A bacia e a cidade padrão abrem o mapa da próxima vez."
+            ? "Crie a conta para enviar correções de relevo. Vamos enviar um e-mail do Vale Alerta SC para confirmar o cadastro. A bacia e a cidade padrão abrem o mapa da próxima vez."
             : "Entre com e-mail e senha. As demarcações gravam no banco na hora."
           : "Banco não configurado (VITE_SUPABASE_URL). Neste aparelho: nome + senha 123."}
       </p>
@@ -271,6 +280,11 @@ export function PatchLoginForm({
           style={{ ...fieldStyle, marginTop: 4 }}
         />
       </label>
+      {notice && (
+        <p style={{ margin: 0, fontSize: 11, color: "#80ed99", lineHeight: 1.4 }}>
+          {notice}
+        </p>
+      )}
       {error && (
         <p style={{ margin: 0, fontSize: 11, color: "#e63946" }}>{error}</p>
       )}
