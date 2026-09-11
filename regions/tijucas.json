@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "tijucas",
-  "title": "Vale Alerta para Enchentes",
-  "subtitle": "Vale do Rio Tijucas — simulador de escoamento",
+  "title": "Vale Alerta SC - Enchentes",
+  "subtitle": "Vale do Rio Tijucas — Simulador de Inundação",
   "river_name": "Rio Tijucas",
   "target_city_id": "sao-joao-batista",
   "surge_city_id": "major-gercino",

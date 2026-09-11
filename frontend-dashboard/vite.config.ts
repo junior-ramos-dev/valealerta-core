@@ -124,8 +124,8 @@ export default defineConfig({
         "hydro_now.json",
       ],
       manifest: {
-        name: "Vale Alerta",
-        short_name: "Vale Alerta",
+        name: "Vale Alerta SC - Enchentes",
+        short_name: "Vale Alerta SC",
         description: "Simulador cidadão de inundação no vale.",
         lang: "pt-BR",
         start_url: "/",

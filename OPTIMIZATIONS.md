@@ -42,7 +42,7 @@ Não existe DEM mundial **gratuito, diário e de 1 m**.
 * **Sentinel-1 SAR diário como DEM de lote** — enxerga água sob nuvem e, às vezes, obra grande; **não** entrega +2 m por terreno todo dia.
 * **Reconstruir 1 m só com foto comercial** — caro, instável e perigoso num alerta (altitude inventada é pior que “não sei”).
 
-“Diário” no Vale Alerta deve significar: **dar para publicar uma correção no mesmo dia da obra**, não voar o planeta de manhã.
+“Diário” no Vale Alerta SC deve significar: **dar para publicar uma correção no mesmo dia da obra**, não voar o planeta de manhã.
 
 ---
 

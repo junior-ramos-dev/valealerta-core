@@ -386,7 +386,7 @@ export function parseRegionPack(body: unknown): RegionPack {
   const pack: RegionPack = {
     schema: Number(raw.schema ?? 1),
     id: String(raw.id ?? "region"),
-    title: String(raw.title ?? "Vale Alerta para Enchentes"),
+    title: String(raw.title ?? "Vale Alerta SC - Enchentes"),
     subtitle: String(raw.subtitle ?? regionRaw.name ?? ""),
     river_name: String(raw.river_name ?? regionRaw.valley ?? "Rio"),
     target_city_id: target,

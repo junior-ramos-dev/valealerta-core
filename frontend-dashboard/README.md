@@ -1,6 +1,6 @@
-# 🌊 Vale Alerta — Simulador Cidadão de Inundação Regional
+# 🌊 Vale Alerta SC — Simulador Cidadão de Inundação Regional
 
-O **Vale Alerta** é uma plataforma web interativa, de código aberto e ultra-leve, desenvolvida para traduzir previsões meteorológicas complexas em informações visuais simples, práticas e acionáveis para o cidadão comum.
+O **Vale Alerta SC** é uma plataforma web interativa, de código aberto e ultra-leve, desenvolvida para traduzir previsões meteorológicas complexas em informações visuais simples, práticas e acionáveis para o cidadão comum.
 
 Focado inicialmente na bacia do **Vale do Rio Tijucas** (Rancho Queimado, Angelina, Major Gercino, Nova Trento, São João Batista, Canelinha e Tijucas), o motor é **independente de localização**. Novas bacias entram como JSON em `regions/` — o **Vale do Itajaí** já está como segundo pacote (provisório: Itajaí-Açu + Itajaí-Mirim). Veja `CONTRIBUTING.md`.
 
@@ -10,7 +10,7 @@ Focado inicialmente na bacia do **Vale do Rio Tijucas** (Rancho Queimado, Angeli
 
 Mudar-se, salvar os móveis ou ficar em casa? Quem vive em regiões propensas a enchentes conhece a angústia de ouvir alertas de *"150 milímetros de chuva nas próximas horas"*. Para a maioria das pessoas, esse número não faz sentido na prática. Ninguém sabe se essa chuva vai apenas molhar a calçada ou cobrir o telhado.
 
-O Vale Alerta resolve esse problema redesenhando a forma como a comunidade entende o risco climático, focando em dois pilares:
+O Vale Alerta SC resolve esse problema redesenhando a forma como a comunidade entende o risco climático, focando em dois pilares:
 
 1. **Atualização Contra Terraformação Humana:** Antigamente, as gerações passadas sabiam de cabeça quando o rio subiria. Hoje, o crescimento urbano acelerado mudou as regras do jogo. Cada prédio construído, cada galpão asfaltado e cada terreno baixo aterrado alteram o caminho da água. Usando dados de relevo por satélite (Copernicus DEM), este simulador computa onde a água se acumula **no terreno da vista atual**, e não numa carta de 20 anos atrás.
 2. **O Efeito Funil e Sincronização de Encostas:** O sol pode estar brilhando no centro de São João Batista, mas um temporal severo caindo simultaneamente nas montanhas de Major Gercino, Angelina e Rancho Queimado — ou no Ribeirão Alferes em Nova Trento — criará uma onda de cheia combinada que descerá o vale. O simulador ajuda o morador a olhar para o topo da montanha e antecipar o perigo com horas de antecedência.
@@ -45,7 +45,7 @@ Existe um segundo tipo de alagamento que o simulador calcula, que ocorre de form
 ---
 
 ### 🔬 Como a Física Plana Simplifica o Código
-A grande virada de chave do **Vale Alerta** é como ele faz esse cálculo rodar instantaneamente em um celular antigo. Em vez de rodar simulações pesadas de dinâmica de fluidos no servidor (que levariam horas), o aplicativo usa o princípio de que **a superfície da água em repouso é plana em relação ao nível do mar**.
+A grande virada de chave do **Vale Alerta SC** é como ele faz esse cálculo rodar instantaneamente em um celular antigo. Em vez de rodar simulações pesadas de dinâmica de fluidos no servidor (que levariam horas), o aplicativo usa o princípio de que **a superfície da água em repouso é plana em relação ao nível do mar**.
 
 O aplicativo calcula a cota absoluta que o rio vai atingir (ex: `Cota da Água = 26 metros acima do nível do mar`). Em seguida, a placa gráfica (GPU) do celular faz uma conta de subtração pixel por pixel contra o mapa de relevo (`Copa-DEM`):
 
@@ -353,6 +353,8 @@ Saídas: `backend-satellite/data/hydro_now.json` e, se a pasta existir, `fronten
 3. `frontend-dashboard/.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`; reinicie o Vite.
 4. Crie a conta no app (aba **Ferramentas** → **Cadastrar**). Primeiro admin: `update public.profiles set role = 'admin' where id = '<uid>';` (Authentication → Users). Em projeto já criado, rode de novo o trecho de `profiles` em `migrations.sql` se faltar `preferred_region_id` / `preferred_city_id`.
 
+Publicar em EC2 + Caddy (domínio, proxies ANA/Copernicus, `curl` de teste): **[DEPLOY.md](../DEPLOY.md)**.
+
 ---
 
 ## 🤝 Como contribuir
@@ -370,7 +372,7 @@ Este é um ecossistema construído pela comunidade para a proteção da comunida
 
 ## 🤖 Desenvolvimento com apoio de IAs
 
-O Vale Alerta foi construído em conjunto com assistentes de inteligência artificial, sempre com revisão humana das decisões de produto, hidrologia e código.
+O Vale Alerta SC foi construído em conjunto com assistentes de inteligência artificial, sempre com revisão humana das decisões de produto, hidrologia e código.
 
 * **Gemini:** estudo de viabilidade — quais fontes públicas (Open-Meteo, ANA HidroWeb, Copernicus DEM, Sentinel-1) são acessíveis sem custo, quais limitações de CORS/API existem, e **protótipos iniciais** da ideia (mapa, régua, pipeline de dados).
 * **Cursor:** a **implementação atual** do repositório (dashboard MapLibre, heatmap de profundidade no DEM, hidrologia no cliente, schema PostGIS e este README).
@@ -381,7 +383,7 @@ As IAs aceleram pesquisa e iteração; a responsabilidade pelo que entra no mapa
 
 ## 👥 Créditos e Co-Criação Tecnológica
 
-O **Vale Alerta** é um projeto de código aberto idealizado e gerenciado por **Airton da Silva Ramos Junior** [[Github: Junior Ramos](https://github.com/junior-ramos-dev)]. A engenharia e a maturidade técnica acelerada deste repositório foram alcançadas através de um fluxo de trabalho colaborativo pioneiro entre inteligência humana e modelos de Inteligência Artificial:
+O **Vale Alerta SC** é um projeto de código aberto idealizado e gerenciado por **Airton da Silva Ramos Junior** [[Github: Junior Ramos](https://github.com/junior-ramos-dev)]. A engenharia e a maturidade técnica acelerada deste repositório foram alcançadas através de um fluxo de trabalho colaborativo pioneiro entre inteligência humana e modelos de Inteligência Artificial:
 
 * **Arquitetura de Conceito e Visão Local:** **[Junior  Ramos]** — Responsável pela idealização do projeto, regras de usabilidade cidadã, definição dos benchmarks históricos (como a calibração de 9m da enchente de 2022) e mapeamento dos pontos de estrangulamento nos bairros baixos (Fernandes, Krequer, Tajuba e Cardoso).
 * **Engenharia e Validação de Fluxo (Interface Gemini):** Toda a estruturação da lógica hidrológica simplificada, formulação de camadas híbridas em "sanduíche", e planejamento de resiliência e persistência de dados offline (PWA) foram desenhados em sessões de design de sistema com o modelo **Google Gemini**.

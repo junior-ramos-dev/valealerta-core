@@ -1,6 +1,6 @@
-# 🤝 Como Contribuir para o Vale Alerta
+# 🤝 Como Contribuir para o Vale Alerta SC
 
-Seja bem-vindo ao projeto **Vale Alerta**. O motor (Copernicus DEM, Open-Meteo, flood-fill, régua, patches) é genérico. Cada bacia é um **pacote de região** em JSON — não é preciso alterar React para incluir um vale novo, desde que o JSON esteja completo e calibrado.
+Seja bem-vindo ao projeto **Vale Alerta SC**. O motor (Copernicus DEM, Open-Meteo, flood-fill, régua, patches) é genérico. Cada bacia é um **pacote de região** em JSON — não é preciso alterar React para incluir um vale novo, desde que o JSON esteja completo e calibrado.
 
 Há dois jeitos de ajudar: **demarcar obras de terra no mapa** (qualquer relator cadastrado) e **adicionar ou calibrar uma bacia** (JSON + PR). O primeiro melhora a mancha **já amanhã**; o segundo escala o app para outro vale.
 

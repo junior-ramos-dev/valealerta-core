@@ -1,15 +1,19 @@
 {
   "schema": 1,
   "id": "itajai",
-  "title": "Vale Alerta para Enchentes",
-  "subtitle": "Vale do Itajaí — Itajaí-Açu e Itajaí-Mirim",
+  "title": "Vale Alerta SC - Enchentes",
+  "subtitle": "Vales do Itajaí-Açu e Itajaí-Mirim - Simulador de Inundação",
   "river_name": "Rio Itajaí-Açu",
   "target_city_id": "blumenau",
   "surge_city_id": "rio-do-sul",
   "live_gauge_id": "blumenau",
   "calibration": {
     "status": "provisional",
-    "benchmark_events": ["2008-11 Blumenau ~17 m na régua municipal", "2011", "2023-10"],
+    "benchmark_events": [
+      "2008-11 Blumenau ~17 m na régua municipal",
+      "2011",
+      "2023-10"
+    ],
     "note": "Cotas, lags e códigos ANA são ponto de partida. Confira estações no HidroWeb e a cota de transbordo com a Defesa Civil / CEOPS-Blumenau antes de usar em operação. Não copie os 6 m de São João Batista."
   },
   "region": {
@@ -239,7 +243,7 @@
         [-48.97, -27.13],
         [-48.915, -27.098],
         [-48.85, -27.05],
-        [-48.78, -27.00],
+        [-48.78, -27.0],
         [-48.72, -26.95],
         [-48.68, -26.91]
       ],
@@ -290,7 +294,15 @@
     "spill_stage_step_m": 0.5,
     "spill_stage_stops_m": [8, 8.5, 10, 12, 14, 16, 17],
     "regua_max_m": 20,
-    "upstream_city_ids": ["rio-do-sul", "ibirama", "apiuna", "indaial", "botuvera", "brusque", "guabiruba"],
+    "upstream_city_ids": [
+      "rio-do-sul",
+      "ibirama",
+      "apiuna",
+      "indaial",
+      "botuvera",
+      "brusque",
+      "guabiruba"
+    ],
     "vertical_datum": "EGM96"
   },
   "copy": {

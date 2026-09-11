@@ -1,4 +1,4 @@
-# Vale Alerta como PWA
+# Vale Alerta SC como PWA
 
 O motor de inundação (régua − DEM → heatmap) **já roda no navegador** (telefone ou computador). A PWA existe para o app **abrir sem torre** e para não precisar baixar de novo o que já esteve no aparelho. Não há “ANA ao vivo” nem previsão nova sem internet.
 
@@ -6,7 +6,9 @@ O ícone (tela inicial, Dock ou janela própria) exige **HTTPS** (produção) ou
 
 Antes de uma cheia, com internet: abra o vale que interessa (aba **Simulação**) e toque **Baixar bacia para o dispositivo**. Sem esse passo, o app instalado é sobretudo o casco (JS/CSS e pacotes JSON); o heatmap some onde o Copernicus ainda não foi gravado.
 
-Passo a passo de instalação: [desenvolvimento](#instalação-em-desenvolvimento) e [produção](#instalação-em-produção).
+Passo a passo do servidor (EC2, Caddy, proxies, DNS): [DEPLOY.md](DEPLOY.md).
+
+Passo a passo de instalação PWA: [desenvolvimento](#instalação-em-desenvolvimento) e [produção](#instalação-em-produção).
 
 ---
 
@@ -98,7 +100,7 @@ Use isto no computador de quem desenvolve. O Chrome só trata `localhost` como i
 2. Abra essa URL no Chrome (mesmo PC, ou o celular na mesma rede só se o preview estiver em HTTPS — em HTTP o install no telefone **não** aparece).
 3. Com internet: escolha a bacia (aba **Simulação**) e toque **Baixar bacia para o dispositivo**. Espere o “Pronto” (o DEM é grande).
 4. Instale:
-   - **Chrome (computador):** ícone de instalação na barra de endereço, ou menu ⋮ → **Instalar Vale Alerta**.
+   - **Chrome (computador):** ícone de instalação na barra de endereço, ou menu ⋮ → **Instalar Vale Alerta SC**.
    - **Chrome (Android), se a página for `localhost` no próprio aparelho ou HTTPS:** menu → **Instalar aplicativo** / **Adicionar à tela inicial**.
 5. Opcional: panear o trecho da cidade com rede para aquecer o basemap.
 
@@ -108,14 +110,14 @@ Para só desenvolver a UI, `npm run dev` continua válido; só não simula a PWA
 
 ## Instalação em produção
 
-Quando o Vale Alerta estiver **no ar** (site público em **HTTPS**), o cidadão não precisa de Node nem do repositório. O service worker e o `manifest.webmanifest` vêm do próprio site.
+Quando o Vale Alerta SC estiver **no ar** (site público em **HTTPS**), o cidadão não precisa de Node nem do repositório. O service worker e o `manifest.webmanifest` vêm do próprio site.
 
 ### No celular (uso do dia a dia)
 
 1. Com internet, abra o endereço de produção no **navegador** (Chrome no Android; Safari no iPhone). Não use aba anônima.
 2. Escolha o vale (Tijucas, Itajaí, …) e toque **Baixar bacia para o dispositivo**. Espere **Pronto** — isso grava cota ANA/Open-Meteo e o relevo Copernicus da bacia.
 3. Instale o aplicativo:
-   - **Android (Chrome):** menu ⋮ → **Instalar aplicativo** ou **Adicionar à tela inicial**. Se o Chrome oferecer o banner **Instalar Vale Alerta**, aceite.
+   - **Android (Chrome):** menu ⋮ → **Instalar aplicativo** ou **Adicionar à tela inicial**. Se o Chrome oferecer o banner **Instalar Vale Alerta SC**, aceite.
    - **iPhone / iPad (Safari):** botão Compartilhar → **Adicionar à Tela de Início** → Adicionar. O iOS não usa o mesmo prompt do Chrome; o atalho abre em tela cheia (`apple-mobile-web-app-capable`).
 4. Abra pelo **ícone** na tela inicial (não pela aba do navegador). Com rede, Tempo Real e previsão atualizam; sem rede, vale o último retrato e o DEM já baixado.
 5. Opcional: com internet, percorra no mapa o bairro que importa para o satélite também ficar em cache.
@@ -126,7 +128,7 @@ Repita o passo 2 quando mudar de bacia ou quiser um retrato hidro mais novo **an
 
 1. Abra a URL HTTPS de produção.
 2. **Baixar bacia para o dispositivo** (o cache fica neste navegador / nesta instalação).
-3. Ícone de instalação na barra de endereço, ou menu → **Instalar Vale Alerta**. Abre em janela própria (`display: standalone`).
+3. Ícone de instalação na barra de endereço, ou menu → **Instalar Vale Alerta SC**. Abre em janela própria (`display: standalone`).
 
 ### Requisitos do site em produção
 
